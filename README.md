@@ -7,28 +7,31 @@ O aplicație C# care se conectează la stream-ul AIS de la aisstream.io, urmăre
 ## Tehnologii
 
 **Backend**
+
 - C# / .NET
 - Npgsql
 - WebSocket
 
 **Bază de date**
+
 - Postgres / Supabase
 
 **Frontend**
+
 - Leaflet.js (hartă interactivă)
 - Leaflet.markercluster (grupare vizuală a navelor apropiate)
 - Supabase JS (citire live a datelor din browser)
 
 ## Structura proiectului
 
-| Fișier / Folder | Rol |
-|---|---|
-| `Program.cs` | Punctul de intrare — orchestrează conectarea și bucla de reconectare |
-| `AiStreamClient.cs` | Conectare WebSocket, subscribe, primire mesaje AIS |
-| `DatabaseService.cs` | Upsert în `ships` și insert în `position_history` |
-| `AisModels.cs` | Clasele care oglindesc structura mesajelor JSON primite |
-| `index.html` | Harta live cu navele, citită direct din Supabase |
-| `css/`, `js/` | Bibliotecile Leaflet și Supabase, folosite local de `index.html` |
+| Fișier / Folder      | Rol                                                              |
+| -------------------- | ---------------------------------------------------------------- |
+| `Program.cs`         | Se ocupă cu conectarea și bucla de reconectare                   |
+| `AiStreamClient.cs`  | Conectare WebSocket, subscribe, primire mesaje AIS               |
+| `DatabaseService.cs` | Upsert în `ships` și insert în `position_history`                |
+| `AisModels.cs`       | Clasele care oglindesc structura mesajelor JSON primite          |
+| `index.html`         | Harta live cu navele, citită direct din Supabase                 |
+| `css/`, `js/`        | Bibliotecile Leaflet și Supabase, folosite local de `index.html` |
 
 ## Rulare — Backend
 
@@ -45,6 +48,7 @@ Creează un proiect propriu pe [Supabase](https://supabase.com) (sau folosește 
 Tabelul `ships` trebuie să aibă o policy de citire publică, altfel harta din `index.html` nu va primi date (Supabase întoarce un răspuns gol, fără eroare explicită, dacă RLS e activ dar nu există nicio policy).
 
 În Supabase, mergi la **Authentication → Policies → ships → Create policy**, și creează o policy:
+
 - **Command**: `SELECT`
 - **Target roles**: implicit (toate rolurile publice)
 - **USING expression**: `true`
@@ -53,10 +57,10 @@ Tabelul `ships` trebuie să aibă o policy de citire publică, altfel harta din 
 
 Creează un fișier `.env` în rădăcina proiectului, cu următoarele variabile:
 
-| Variabilă | Descriere |
-|---|---|
+| Variabilă           | Descriere                             |
+| ------------------- | ------------------------------------- |
 | `AISSTREAM_API_KEY` | Cheia API obținută de pe aisstream.io |
-| `PASSWORD` | Parola bazei tale de date Supabase |
+| `PASSWORD`          | Parola bazei tale de date Supabase    |
 
 ### 5. Rulare aplicație
 
@@ -66,7 +70,7 @@ dotnet run
 
 ## Rulare — Frontend (harta live)
 
-`index.html` citește direct din Supabase, folosind cheia publică `anon` (sigură de expus în cod client-side — protecția reală vine din RLS, configurat la pasul 3).
+`index.html` citește direct din Supabase, folosind cheia publică `anon`.
 
 1. Deschide `index.html` cu un server local (ex. extensia **Live Server** din VS Code).
 2. Dacă folosești propriul tău proiect Supabase, înlocuiește URL-ul și cheia `anon` din `index.html` cu ale tale (Supabase Dashboard → Settings → API).
