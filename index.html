@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <link rel="stylesheet" href="css/leaflet.css">
+    <link rel ="stylesheet" href="css/MarkerCluster.css">
+    <link rel ="stylesheet" href="css/MarkerCluster.Default.css">
+<style>
+    html, body{
+        margin: 0;
+        padding: 0;
+    }
+    #map {
+        position: absolute;
+        top: 0; left: 0; right: 0; bottom: 0;
+    }
+</style>
+</head>
+<body> 
+    <div id="map"> </div>
+    <script src ="js/leaflet.js"></script>
+    <script src="js/leaflet.markercluster.js"></script>
+    <script>
+        var map = L.map('map').setView([43.5, 34.5], 6);
+        var markerClusterGroup = L.markerClusterGroup();
+        var shipIcon = L.icon({
+            iconUrl: "https://img.icons8.com/?size=100&id=17505&format=png&color=000000",
+            iconSize: [32, 32],
+            iconAnchor: [16, 16],
+        });
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+        markerClusterGroup.addTo(map);
+    </script>
+    <script src = "js/supabase-js@2.js"></script>
+    <script>
+        function actualizeazaNave() {
+            supabaseClient.from("ships").select("last_latitude, last_longitude, ship_name, mmsi, true_heading").then((result) => {
+                if (result.error) {
+                    console.error("Eroare la returnarea datelor:", result.error);
+                    return;
+                }
+                markerClusterGroup.clearLayers();
+                result.data.forEach((ship) => {
+                    const marker = L.marker([ship.last_latitude, ship.last_longitude], {icon: shipIcon}).addTo(markerClusterGroup)
+                    .bindPopup(`Name: ${ship.ship_name}<br>MMSI: ${ship.mmsi}<br>Heading: ${ship.true_heading}`);
+                });
+            });
+        }
+        const supabaseClient = window.supabase.createClient("https://meelehndrbaqdhmmvtip.supabase.co", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1lZWxlaG5kcmJhcWRobW12dGlwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg1MjM5ODUsImV4cCI6MjEwNDA5OTk4NX0.vlAMy013lam4PMHO4F0ReGmXO22HPmARDJoQO5u6Mak");
+        var markers = [];
+        actualizeazaNave();
+        setInterval(actualizeazaNave, 5000);
+    </script>
+</body> 
