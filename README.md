@@ -2,7 +2,7 @@
 
 ## Descriere
 
-O aplicație C# care se conectează la stream-ul AIS de la aisstream.io, urmărește nave din Marea Neagră în timp real, și salvează pozițiile lor curente + istoricul de mișcare într-o bază de date Postgres. Include și o hartă interactivă live, care afișează navele pe hartă direct din browser.
+O aplicație C# care se conectează la stream-ul AIS de la aisstream.io, urmărește nave din Marea Neagră în timp real, și salvează pozițiile lor curente + istoricul de mișcare într-o bază de date Postgres. Include și o hartă interactivă live, care afișează navele pe hartă direct din browser. Pozițiile primite sunt validate geografic pentru a detecta GPS spoofing, un fenomen frecvent în zona Crimeei.
 
 ## Tehnologii
 
@@ -11,6 +11,7 @@ O aplicație C# care se conectează la stream-ul AIS de la aisstream.io, urmăre
 - C# / .NET
 - Npgsql
 - WebSocket
+- NetTopologySuite (validare geospațială land/sea)
 
 **Bază de date**
 
@@ -24,14 +25,16 @@ O aplicație C# care se conectează la stream-ul AIS de la aisstream.io, urmăre
 
 ## Structura proiectului
 
-| Fișier / Folder      | Rol                                                              |
-| -------------------- | ---------------------------------------------------------------- |
-| `Program.cs`         | Se ocupă cu conectarea și bucla de reconectare                   |
-| `AiStreamClient.cs`  | Conectare WebSocket, subscribe, primire mesaje AIS               |
-| `DatabaseService.cs` | Upsert în `ships` și insert în `position_history`                |
-| `AisModels.cs`       | Clasele care oglindesc structura mesajelor JSON primite          |
-| `index.html`         | Harta live cu navele, citită direct din Supabase                 |
-| `css/`, `js/`        | Bibliotecile Leaflet și Supabase, folosite local de `index.html` |
+| Fișier / Folder           | Rol                                                              |
+| ------------------------- | ---------------------------------------------------------------- |
+| `Program.cs`              | Se ocupă cu conectarea și bucla de reconectare                   |
+| `AiStreamClient.cs`       | Conectare WebSocket, subscribe, primire mesaje AIS               |
+| `DatabaseService.cs`      | Upsert în `ships` și insert în `position_history`                |
+| `GeoValidationService.cs` | Validează dacă o poziție cade pe uscat (posibil GPS spoofing)    |
+| `AisModels.cs`            | Clasele care oglindesc structura mesajelor JSON primite          |
+| `Data/`                   | Fișiere GeoJSON cu contur de uscat/ocean (sursă: Natural Earth)  |
+| `index.html`              | Harta live cu navele, citită direct din Supabase                 |
+| `css/`, `js/`             | Bibliotecile Leaflet și Supabase, folosite local de `index.html` |
 
 ## Rulare — Backend
 
@@ -52,6 +55,8 @@ Tabelul `ships` trebuie să aibă o policy de citire publică, altfel harta din 
 - **Command**: `SELECT`
 - **Target roles**: implicit (toate rolurile publice)
 - **USING expression**: `true`
+
+Repetă aceeași policy și pentru tabelul `position_history`, altfel traseele navelor nu vor fi vizibile în hartă.
 
 ### 4. Variabile de mediu
 
@@ -75,7 +80,7 @@ dotnet run
 1. Deschide `index.html` cu un server local (ex. extensia **Live Server** din VS Code).
 2. Dacă folosești propriul tău proiect Supabase, înlocuiește URL-ul și cheia `anon` din `index.html` cu ale tale (Supabase Dashboard → Settings → API).
 
-Harta se actualizează automat la fiecare 5 secunde, arătând ultima poziție cunoscută a fiecărei nave.
+Harta se actualizează automat la fiecare 5 secunde, arătând ultima poziție cunoscută a fiecărei nave. Traseul unei nave (buton "Vezi traseu" din popup) exclude automat pozițiile marcate ca implauzibile.
 
 ## Structura bazei de date
 
@@ -108,9 +113,20 @@ CREATE TABLE IF NOT EXISTS position_history (
     latitude DOUBLE PRECISION,
     longitude DOUBLE PRECISION,
     recorded_time TIMESTAMPTZ,
+    is_plausible BOOLEAN DEFAULT TRUE,
     FOREIGN KEY (mmsi) REFERENCES ships(mmsi)
 );
 ```
+
+`is_plausible` indică dacă poziția a trecut validarea geografică (vezi secțiunea **GPS Spoofing Detection** mai jos). Datele nu sunt niciodată respinse la insert — toate pozițiile sunt salvate, doar marcate, pentru a păstra istoricul complet disponibil pentru analiză.
+
+## GPS Spoofing Detection
+
+Zona Mării Negre, în special în jurul Crimeei, este cunoscută pentru spoofing GPS pe scară largă — nave care raportează prin AIS poziții care nu corespund locației lor reale, adesea plasându-le pe uscat în loc de mare.
+
+Pentru a filtra acest fenomen, aplicația validează fiecare poziție primită împotriva unei geometrii land/sea (sursă: [Natural Earth](https://www.naturalearthdata.com/), rezoluție 1:50m), folosind [NetTopologySuite](https://github.com/NetTopologySuite/NetTopologySuite). Pozițiile care cad pe uscat (cu o toleranță mică pentru simplificarea liniei de coastă) sunt marcate `is_plausible = false`.
+
+**Detalii tehnice:** validarea calculează distanța de la punct la cel mai apropiat poligon de uscat, folosind un prag de aproximativ 1km — necesar pentru că simplificarea coastline-ului la rezoluție 1:50m poate lăsa goluri mici (sute de metri) între geometrie și coordonatele reale, în special în zone cu coastă muntoasă/zimțată.
 
 ## Funcționalități
 
@@ -118,6 +134,7 @@ CREATE TABLE IF NOT EXISTS position_history (
 - Deserializare a mesajelor AIS în obiecte C# tipizate
 - Upsert automat al ultimei poziții per navă
 - Salvare a istoricului complet de mișcare
+- Validare geografică a pozițiilor pentru detectarea GPS spoofing (frecvent în zona Crimeei)
 - Reconectare automată la WebSocket în caz de întrerupere a conexiunii
 - Gestionare a erorilor de deserializare și de bază de date, fără oprirea programului
 - Hartă interactivă live, cu grupare vizuală (clustering) a navelor apropiate

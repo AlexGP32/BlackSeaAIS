@@ -22,17 +22,12 @@
     <script>
         var map = L.map('map').setView([43.5, 34.5], 6);
         var markerClusterGroup = L.markerClusterGroup();
-        var shipIcon = L.icon({
-            iconUrl: "https://img.icons8.com/?size=100&id=17505&format=png&color=000000",
-            iconSize: [32, 32],
-            iconAnchor: [16, 16],
-        });
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
         markerClusterGroup.addTo(map);
     </script>
     <script src = "js/supabase-js@2.js"></script>
     <script>
-        function actualizeazaNave() {
+        function UpdateShips() {
             supabaseClient.from("ships").select("last_latitude, last_longitude, ship_name, mmsi, true_heading").then((result) => {
                 if (result.error) {
                     console.error("Eroare la returnarea datelor:", result.error);
@@ -40,14 +35,46 @@
                 }
                 markerClusterGroup.clearLayers();
                 result.data.forEach((ship) => {
-                    const marker = L.marker([ship.last_latitude, ship.last_longitude], {icon: shipIcon}).addTo(markerClusterGroup)
-                    .bindPopup(`Name: ${ship.ship_name}<br>MMSI: ${ship.mmsi}<br>Heading: ${ship.true_heading}`);
+                    const rotatedIcon = L.divIcon({
+                    html: `<img src="pngs/boat.png" style="width: 50px; height: 50px; transform: rotate(${ship.true_heading}deg);" />`,
+                    iconSize: [50, 50],
+                    iconAnchor: [25, 25],
+                    className: 'ship-icon'
+                    });
+                    const marker = L.marker([ship.last_latitude, ship.last_longitude], {icon: rotatedIcon}).addTo(markerClusterGroup)
+                    .bindPopup(`Name: ${ship.ship_name}<br>MMSI: ${ship.mmsi}<br>Heading: ${ship.true_heading}<br><button onclick="ShowRoute(${ship.mmsi})">Vezi traseu</button>`);
                 });
             });
         }
+        var currentRoute = null;
+        function ShowRoute(mmsi){
+            console.log("mmsi trimis:" , mmsi, typeof mmsi)
+            supabaseClient.from("position_history")
+            .select("latitude, longitude, recorded_time")
+            .eq("mmsi", mmsi)
+            .eq("is_plausible", true)
+            .order("recorded_time", {ascending: false})
+            .limit(20)
+            .then((result) => {
+                if (result.error) {
+                    console.error("Eroare la returnarea datelor:", result.error);
+                    return;
+                }
+                if(!result.data || result.data.length === 0){
+                    alert("Nu există date pentru acest traseu.");
+                    return;
+                }
+                const latlngs = result.data.reverse().map((position) => [position.latitude, position.longitude]);
+                if(currentRoute){
+                    map.removeLayer(currentRoute);
+                }
+                const polyline = L.polyline(latlngs, {color: 'blue'}).addTo(map);
+                map.fitBounds(polyline.getBounds());
+                currentRoute = polyline;
+            });
+        }
         const supabaseClient = window.supabase.createClient("https://meelehndrbaqdhmmvtip.supabase.co", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1lZWxlaG5kcmJhcWRobW12dGlwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg1MjM5ODUsImV4cCI6MjEwNDA5OTk4NX0.vlAMy013lam4PMHO4F0ReGmXO22HPmARDJoQO5u6Mak");
-        var markers = [];
-        actualizeazaNave();
-        setInterval(actualizeazaNave, 5000);
+        UpdateShips();
+        setInterval(UpdateShips, 5000);
     </script>
 </body> 

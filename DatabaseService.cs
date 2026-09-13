@@ -4,10 +4,12 @@ public class DatabaseService
 
 {
     private readonly NpgsqlConnection _conn;
+    private readonly GeoValidationService _geoservice;
 
-    public DatabaseService(NpgsqlConnection conn)
+    public DatabaseService(NpgsqlConnection conn, GeoValidationService geoservice)
     {
         _conn = conn;
+        _geoservice = geoservice;
     }
 
     public async Task UpsertShip(MetaData meta, PositionReport pr, DateTime time)
@@ -37,11 +39,13 @@ public class DatabaseService
     }
     public async Task InsertHistory(MetaData meta, PositionReport pr, DateTime time)
     {
-        var cmdHistory = new NpgsqlCommand(@"INSERT INTO position_history (mmsi, latitude, longitude, recorded_time) VALUES (@mmsi, @latitude, @longitude, @recorded_time);", _conn);
+        bool isPlausible = !_geoservice.IsOnLand(pr.Latitude, pr.Longitude);
+        var cmdHistory = new NpgsqlCommand(@"INSERT INTO position_history (mmsi, latitude, longitude, recorded_time, is_plausible) VALUES (@mmsi, @latitude, @longitude, @recorded_time, @is_plausible);", _conn);
         cmdHistory.Parameters.AddWithValue("mmsi", meta.MMSI);
         cmdHistory.Parameters.AddWithValue("latitude", pr.Latitude);
         cmdHistory.Parameters.AddWithValue("longitude", pr.Longitude);
         cmdHistory.Parameters.AddWithValue("recorded_time", time);
+        cmdHistory.Parameters.AddWithValue("is_plausible", isPlausible);
         await cmdHistory.ExecuteNonQueryAsync();
     }
 }

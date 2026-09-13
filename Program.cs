@@ -19,7 +19,8 @@ builder.Password = Environment.GetEnvironmentVariable("PASSWORD");
 var APIKey = Environment.GetEnvironmentVariable("AISSTREAM_API_KEY") ?? "";
 await using var conn = new NpgsqlConnection(builder.ToString());
 await conn.OpenAsync();
-var db = new DatabaseService(conn);
+var geo = new GeoValidationService();
+var db = new DatabaseService(conn, geo);
 var client = new AiStreamClient();
 while (true)
 {
