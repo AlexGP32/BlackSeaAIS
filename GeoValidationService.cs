@@ -5,8 +5,7 @@ using System.Linq;
 public class GeoValidationService
 {
     private readonly List<Geometry> _landPolygons;
-    private const double LandThresholdDegrees = 0.01;
-
+    private const double InsideLandThresholdDegrees = 0.002;
     public GeoValidationService()
     {
         var path = Path.Combine(AppContext.BaseDirectory, "Data", "black_sea_land.geojson");
@@ -22,6 +21,6 @@ public class GeoValidationService
     public bool IsOnLand(double lat, double lon)
     {
         var point = new Point(lon, lat);
-        return _landPolygons.Any(g => g.Distance(point) < LandThresholdDegrees);
+        return _landPolygons.Any(g => g.Contains(point) && g.Boundary.Distance(point) > InsideLandThresholdDegrees);
     }
 }

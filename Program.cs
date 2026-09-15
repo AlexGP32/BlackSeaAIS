@@ -1,15 +1,8 @@
 ﻿using DotNetEnv;
-using System.Data.SqlTypes;
 using Npgsql;
-using System.Net.Sockets;
-using System.Net.WebSockets;
-using System.Runtime.CompilerServices;
-using System.Text;
-using System.Text.Json;
-using System.Text.Json.Serialization;
-using System.Runtime.InteropServices;
-using System.Linq.Expressions;
+
 Env.Load();
+var geoService = new GeoValidationService();
 var builder = new NpgsqlConnectionStringBuilder();
 builder.Host = "db.meelehndrbaqdhmmvtip.supabase.co";
 builder.Port = 5432;
