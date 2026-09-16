@@ -35,7 +35,7 @@
                 }
                 markerClusterGroup.clearLayers();
                 result.data.forEach((ship) => {
-                    const warningicon = ship.is_plausible ? '' : '<span style="position: absolute; top: -6px; left: -12px; right: -6px; font-size: 15px; pointer-events: none; title="Datele nu sunt corecte (posibil pe uscat)">⚠️</span>';
+                    const warningicon = ship.is_plausible ? '' : '<span style="position: absolute; top: -6px; left: -12px; right: -6px; font-size: 15px; pointer-events: none"; title="Datele nu sunt corecte (posibil pe uscat)">⚠️</span>';
                     const rotatedIcon = L.divIcon({
                     html: `<div style = "position: relative;"> ${warningicon} <img src="pngs/boat.png" style="width: 50px; height: 50px; transform: rotate(${ship.true_heading}deg);" /></div>`,
                     iconSize: [50, 50],

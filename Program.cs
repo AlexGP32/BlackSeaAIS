@@ -3,6 +3,7 @@ using Npgsql;
 
 Env.Load();
 var geoService = new GeoValidationService();
+
 var builder = new NpgsqlConnectionStringBuilder();
 builder.Host = "db.meelehndrbaqdhmmvtip.supabase.co";
 builder.Port = 5432;

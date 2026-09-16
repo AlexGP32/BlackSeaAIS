@@ -1,5 +1,7 @@
 # BlackSeaAIS
 
+![BlackSeaAIS demo](demo.gif)
+
 ## Descriere
 
 O aplicație C# care se conectează la stream-ul AIS de la aisstream.io, urmărește nave din Marea Neagră în timp real, și salvează pozițiile lor curente + istoricul de mișcare într-o bază de date Postgres. Include și o hartă interactivă live, care afișează navele pe hartă direct din browser. Pozițiile primite sunt validate geografic pentru a detecta GPS spoofing, un fenomen frecvent în zona Crimeei.
@@ -12,12 +14,10 @@ O aplicație C# care se conectează la stream-ul AIS de la aisstream.io, urmăre
 - Npgsql
 - WebSocket
 - NetTopologySuite (validare geospațială land/sea)
-
-**Bază de date**
+  **Bază de date**
 
 - Postgres / Supabase
-
-**Frontend**
+  **Frontend**
 
 - Leaflet.js (hartă interactivă)
 - Leaflet.markercluster (grupare vizuală a navelor apropiate)
@@ -55,8 +55,7 @@ Tabelul `ships` trebuie să aibă o policy de citire publică, altfel harta din 
 - **Command**: `SELECT`
 - **Target roles**: implicit (toate rolurile publice)
 - **USING expression**: `true`
-
-Repetă aceeași policy și pentru tabelul `position_history`, altfel traseele navelor nu vor fi vizibile în hartă.
+  Repetă aceeași policy și pentru tabelul `position_history`, altfel traseele navelor nu vor fi vizibile în hartă.
 
 ### 4. Variabile de mediu
 
@@ -79,8 +78,7 @@ dotnet run
 
 1. Deschide `index.html` cu un server local (ex. extensia **Live Server** din VS Code).
 2. Dacă folosești propriul tău proiect Supabase, înlocuiește URL-ul și cheia `anon` din `index.html` cu ale tale (Supabase Dashboard → Settings → API).
-
-Harta se actualizează automat la fiecare 5 secunde, arătând ultima poziție cunoscută a fiecărei nave. Traseul unei nave (buton "Vezi traseu" din popup) exclude automat pozițiile marcate ca implauzibile.
+   Harta se actualizează automat la fiecare 5 secunde, arătând ultima poziție cunoscută a fiecărei nave. Traseul unei nave (buton "Vezi traseu" din popup) exclude automat pozițiile marcate ca implauzibile.
 
 ## Structura bazei de date
 
@@ -98,7 +96,8 @@ CREATE TABLE IF NOT EXISTS ships (
     cog DOUBLE PRECISION,
     true_heading INTEGER,
     navigational_status INTEGER,
-    last_update TIMESTAMPTZ
+    last_update TIMESTAMPTZ,
+    is_plausible BOOLEAN DEFAULT TRUE
 );
 ```
 
@@ -124,9 +123,9 @@ CREATE TABLE IF NOT EXISTS position_history (
 
 Zona Mării Negre, în special în jurul Crimeei, este cunoscută pentru spoofing GPS pe scară largă — nave care raportează prin AIS poziții care nu corespund locației lor reale, adesea plasându-le pe uscat în loc de mare.
 
-Pentru a filtra acest fenomen, aplicația validează fiecare poziție primită împotriva unei geometrii land/sea (sursă: [Natural Earth](https://www.naturalearthdata.com/), rezoluție 1:50m), folosind [NetTopologySuite](https://github.com/NetTopologySuite/NetTopologySuite). Pozițiile care cad pe uscat (cu o toleranță mică pentru simplificarea liniei de coastă) sunt marcate `is_plausible = false`.
+Pentru a filtra acest fenomen, aplicația validează fiecare poziție primită împotriva unei geometrii land/sea (sursă: [Natural Earth](https://www.naturalearthdata.com/), rezoluție 1:50m), folosind [NetTopologySuite](https://github.com/NetTopologySuite/NetTopologySuite). Pozițiile care cad pe uscat sunt marcate `is_plausible = false`.
 
-**Detalii tehnice:** validarea calculează distanța de la punct la cel mai apropiat poligon de uscat, folosind un prag de aproximativ 1km — necesar pentru că simplificarea coastline-ului la rezoluție 1:50m poate lăsa goluri mici (sute de metri) între geometrie și coordonatele reale, în special în zone cu coastă muntoasă/zimțată.
+**Detalii tehnice:** un punct este considerat pe uscat doar dacă se află **în interiorul** unui poligon de uscat, la o distanță de graniță mai mare decât un prag mic (~200m). Verificarea doar a distanței față de cel mai apropiat poligon (fără condiția "în interior") a fost respinsă în timpul dezvoltării — marca greșit nave aflate în port sau foarte aproape de coastă ca fiind pe uscat. Condiția combinată (interior + distanță minimă de graniță) reduce fals-pozitivele cauzate de simplificarea coastline-ului la rezoluție 1:50m, păstrând totuși detecția corectă pentru poziții clar eronate (ex. o navă "poziționată" în mijlocul unui parc din Crimeea, cauzată de spoofing).
 
 ## Funcționalități
 
@@ -138,4 +137,7 @@ Pentru a filtra acest fenomen, aplicația validează fiecare poziție primită �
 - Reconectare automată la WebSocket în caz de întrerupere a conexiunii
 - Gestionare a erorilor de deserializare și de bază de date, fără oprirea programului
 - Hartă interactivă live, cu grupare vizuală (clustering) a navelor apropiate
+- Rotația iconiței fiecărei nave în funcție de direcția reală de mișcare (true heading)
+- Afișare a traseului istoric al unei nave, la cerere (excluzând pozițiile implauzibile)
+- Avertisment vizual pentru navele cu poziții suspecte
 - Actualizare automată a hărții la fiecare 5 secunde
