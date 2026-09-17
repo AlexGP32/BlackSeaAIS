@@ -4,7 +4,7 @@
 
 ## Descriere
 
-O aplicație C# care se conectează la stream-ul AIS de la aisstream.io, urmărește nave din Marea Neagră în timp real, și salvează pozițiile lor curente + istoricul de mișcare într-o bază de date Postgres. Include și o hartă interactivă live, care afișează navele pe hartă direct din browser. Pozițiile primite sunt validate geografic pentru a detecta GPS spoofing, un fenomen frecvent în zona Crimeei.
+O aplicație C# care se conectează la stream-ul AIS de la aisstream.io, urmărește nave din Marea Neagră în timp real, și salvează pozițiile lor curente + istoricul de mișcare într-o bază de date Postgres. Include și o hartă interactivă live, care afișează navele pe hartă direct din browser. Pozițiile primite sunt validate geografic pentru a detecta GPS spoofing.
 
 ## Tehnologii
 
@@ -13,8 +13,9 @@ O aplicație C# care se conectează la stream-ul AIS de la aisstream.io, urmăre
 - C# / .NET
 - Npgsql
 - WebSocket
-- NetTopologySuite (validare geospațială land/sea)
-  **Bază de date**
+- NetTopologySuit
+
+**Bază de date**
 
 - Postgres / Supabase
   **Frontend**
@@ -32,7 +33,7 @@ O aplicație C# care se conectează la stream-ul AIS de la aisstream.io, urmăre
 | `DatabaseService.cs`      | Upsert în `ships` și insert în `position_history`                |
 | `GeoValidationService.cs` | Validează dacă o poziție cade pe uscat (posibil GPS spoofing)    |
 | `AisModels.cs`            | Clasele care oglindesc structura mesajelor JSON primite          |
-| `Data/`                   | Fișiere GeoJSON cu contur de uscat/ocean (sursă: Natural Earth)  |
+| `Data/`                   | Fișierul GeoJSON cu contur de uscat (sursă: Natural Earth)       |
 | `index.html`              | Harta live cu navele, citită direct din Supabase                 |
 | `css/`, `js/`             | Bibliotecile Leaflet și Supabase, folosite local de `index.html` |
 
@@ -121,11 +122,11 @@ CREATE TABLE IF NOT EXISTS position_history (
 
 ## GPS Spoofing Detection
 
-Zona Mării Negre, în special în jurul Crimeei, este cunoscută pentru spoofing GPS pe scară largă — nave care raportează prin AIS poziții care nu corespund locației lor reale, adesea plasându-le pe uscat în loc de mare.
+Zona Mării Negre, este cunoscută pentru spoofing GPS pe scară largă.Reprezintă navele care raportează prin AIS poziții care nu corespund locației lor reale, adesea plasându-le pe uscat în loc de mare.
 
 Pentru a filtra acest fenomen, aplicația validează fiecare poziție primită împotriva unei geometrii land/sea (sursă: [Natural Earth](https://www.naturalearthdata.com/), rezoluție 1:50m), folosind [NetTopologySuite](https://github.com/NetTopologySuite/NetTopologySuite). Pozițiile care cad pe uscat sunt marcate `is_plausible = false`.
 
-**Detalii tehnice:** un punct este considerat pe uscat doar dacă se află **în interiorul** unui poligon de uscat, la o distanță de graniță mai mare decât un prag mic (~200m). Verificarea doar a distanței față de cel mai apropiat poligon (fără condiția "în interior") a fost respinsă în timpul dezvoltării — marca greșit nave aflate în port sau foarte aproape de coastă ca fiind pe uscat. Condiția combinată (interior + distanță minimă de graniță) reduce fals-pozitivele cauzate de simplificarea coastline-ului la rezoluție 1:50m, păstrând totuși detecția corectă pentru poziții clar eronate (ex. o navă "poziționată" în mijlocul unui parc din Crimeea, cauzată de spoofing).
+**Detalii tehnice:** un punct este considerat pe uscat doar dacă se află **în interiorul** unui poligon de uscat, la o distanță de graniță mai mare decât un prag mic (~200m). Condiția combinată (interior + distanță minimă de graniță) reduce fals-pozitivele cauzate de simplificarea coastline-ului la rezoluție 1:50m, păstrând totuși detecția corectă pentru poziții clar eronate.
 
 ## Funcționalități
 
@@ -133,7 +134,7 @@ Pentru a filtra acest fenomen, aplicația validează fiecare poziție primită �
 - Deserializare a mesajelor AIS în obiecte C# tipizate
 - Upsert automat al ultimei poziții per navă
 - Salvare a istoricului complet de mișcare
-- Validare geografică a pozițiilor pentru detectarea GPS spoofing (frecvent în zona Crimeei)
+- Validare geografică a pozițiilor pentru detectarea GPS spoofing
 - Reconectare automată la WebSocket în caz de întrerupere a conexiunii
 - Gestionare a erorilor de deserializare și de bază de date, fără oprirea programului
 - Hartă interactivă live, cu grupare vizuală (clustering) a navelor apropiate
