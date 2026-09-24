@@ -1,15 +1,19 @@
 using Npgsql;
 
 public class DatabaseService
-
 {
     private readonly NpgsqlConnection _conn;
-    private readonly GeoValidationService _geoservice;
+    private readonly IGeoValidationService _geoservice;
 
-    public DatabaseService(NpgsqlConnection conn, GeoValidationService geoservice)
+    public DatabaseService(NpgsqlConnection conn, IGeoValidationService geoservice)
     {
         _conn = conn;
         _geoservice = geoservice;
+    }
+
+    internal bool DeterminePlausibility(PositionReport pr)
+    {
+        return !_geoservice.IsOnLand(pr.Latitude, pr.Longitude);
     }
 
     public async Task UpsertShip(MetaData meta, PositionReport pr, DateTime time)
@@ -52,6 +56,7 @@ public class DatabaseService
             await cmd.ExecuteNonQueryAsync();
         }
     }
+
     public async Task InsertHistory(MetaData meta, PositionReport pr, DateTime time)
     {
         bool isPlausible = !_geoservice.IsOnLand(pr.Latitude, pr.Longitude);

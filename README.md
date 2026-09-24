@@ -10,15 +10,21 @@ O aplicație C# care se conectează la stream-ul AIS de la aisstream.io, urmăre
 
 **Backend**
 
-- C# / .NET
+- C# / .NET 9
 - Npgsql
 - WebSocket
-- NetTopologySuit
+- NetTopologySuite
+
+**Teste**
+
+- xUnit
+- Moq
 
 **Bază de date**
 
 - Postgres / Supabase
-  **Frontend**
+
+**Frontend**
 
 - Leaflet.js (hartă interactivă)
 - Leaflet.markercluster (grupare vizuală a navelor apropiate)
@@ -26,16 +32,25 @@ O aplicație C# care se conectează la stream-ul AIS de la aisstream.io, urmăre
 
 ## Structura proiectului
 
-| Fișier / Folder           | Rol                                                              |
-| ------------------------- | ---------------------------------------------------------------- |
-| `Program.cs`              | Se ocupă cu conectarea și bucla de reconectare                   |
-| `AiStreamClient.cs`       | Conectare WebSocket, subscribe, primire mesaje AIS               |
-| `DatabaseService.cs`      | Upsert în `ships` și insert în `position_history`                |
-| `GeoValidationService.cs` | Validează dacă o poziție cade pe uscat (posibil GPS spoofing)    |
-| `AisModels.cs`            | Clasele care oglindesc structura mesajelor JSON primite          |
-| `Data/`                   | Fișierul GeoJSON cu contur de uscat (sursă: Natural Earth)       |
-| `index.html`              | Harta live cu navele, citită direct din Supabase                 |
-| `css/`, `js/`             | Bibliotecile Leaflet și Supabase, folosite local de `index.html` |
+```
+BlackSeaAIProject/
+├── BlackSeaAIS.sln
+├── BlackSeaAIS/          # aplicația
+└── BlackSeaAIS.Tests/    # testele unitare
+```
+
+| Fișier / Folder            | Rol                                                              |
+| -------------------------- | ---------------------------------------------------------------- |
+| `Program.cs`               | Se ocupă cu conectarea și bucla de reconectare                   |
+| `AiStreamClient.cs`        | Conectare WebSocket, subscribe, primire mesaje AIS               |
+| `DatabaseService.cs`       | Upsert în `ships` și insert în `position_history`                |
+| `GeoValidationService.cs`  | Validează dacă o poziție cade pe uscat (posibil GPS spoofing)    |
+| `IGeoValidationService.cs` | Interfața serviciului de validare (permite mock-uri în teste)    |
+| `AisModels.cs`             | Clasele care oglindesc structura mesajelor JSON primite          |
+| `Data/`                    | Fișierul GeoJSON cu contur de uscat (sursă: Natural Earth)       |
+| `index.html`               | Harta live cu navele, citită direct din Supabase                 |
+| `css/`, `js/`              | Bibliotecile Leaflet și Supabase, folosite local de `index.html` |
+| `BlackSeaAIS.Tests/`       | Proiectul de teste unitare (xUnit + Moq)                         |
 
 ## Rulare — Backend
 
@@ -56,11 +71,12 @@ Tabelul `ships` trebuie să aibă o policy de citire publică, altfel harta din 
 - **Command**: `SELECT`
 - **Target roles**: implicit (toate rolurile publice)
 - **USING expression**: `true`
-  Repetă aceeași policy și pentru tabelul `position_history`, altfel traseele navelor nu vor fi vizibile în hartă.
+
+Repetă aceeași policy și pentru tabelul `position_history`, altfel traseele navelor nu vor fi vizibile în hartă.
 
 ### 4. Variabile de mediu
 
-Creează un fișier `.env` în rădăcina proiectului, cu următoarele variabile:
+Creează un fișier `.env` în folderul `BlackSeaAIS/` (lângă `BlackSeaAIS.csproj`), cu următoarele variabile:
 
 | Variabilă           | Descriere                             |
 | ------------------- | ------------------------------------- |
@@ -70,6 +86,7 @@ Creează un fișier `.env` în rădăcina proiectului, cu următoarele variabile
 ### 5. Rulare aplicație
 
 ```bash
+cd BlackSeaAIS
 dotnet run
 ```
 
@@ -79,7 +96,24 @@ dotnet run
 
 1. Deschide `index.html` cu un server local (ex. extensia **Live Server** din VS Code).
 2. Dacă folosești propriul tău proiect Supabase, înlocuiește URL-ul și cheia `anon` din `index.html` cu ale tale (Supabase Dashboard → Settings → API).
-   Harta se actualizează automat la fiecare 5 secunde, arătând ultima poziție cunoscută a fiecărei nave. Traseul unei nave (buton "Vezi traseu" din popup) exclude automat pozițiile marcate ca implauzibile.
+
+Harta se actualizează automat la fiecare 5 secunde, arătând ultima poziție cunoscută a fiecărei nave. Traseul unei nave (buton "Vezi traseu" din popup) exclude automat pozițiile marcate ca implauzibile.
+
+## Teste
+
+Din folderul cu fișierul `.sln`:
+
+```bash
+dotnet test
+```
+
+Testele unitare acoperă:
+
+- **`GeoValidationService`**: detecția de uscat, folosind un poligon sintetic în loc de fișierul GeoJSON real (interior, exterior, prag de graniță, ordinea lat/lon, listă goală de poligoane)
+- **`DatabaseService.DeterminePlausibility`**: logica de plauzibilitate, cu `IGeoValidationService` înlocuit printr-un mock (Moq)
+- **`AisMessageTests`**: deserializarea mesajelor AIS
+
+Operațiile SQL din `UpsertShip` și `InsertHistory` nu sunt acoperite de teste unitare, pentru că cer o instanță Postgres reală.
 
 ## Structura bazei de date
 
@@ -118,15 +152,15 @@ CREATE TABLE IF NOT EXISTS position_history (
 );
 ```
 
-`is_plausible` indică dacă poziția a trecut validarea geografică (vezi secțiunea **GPS Spoofing Detection** mai jos). Datele nu sunt niciodată respinse la insert — toate pozițiile sunt salvate, doar marcate, pentru a păstra istoricul complet disponibil pentru analiză.
+`is_plausible` indică dacă poziția a trecut validarea geografică (vezi secțiunea **GPS Spoofing Detection** mai jos). În `position_history`, toate pozițiile sunt salvate, doar marcate, pentru a păstra istoricul complet disponibil pentru analiză. În `ships`, o poziție pe uscat nu suprascrie ultima poziție validă a navei, ci doar marchează nava ca implauzibilă.
 
 ## GPS Spoofing Detection
 
-Zona Mării Negre, este cunoscută pentru spoofing GPS pe scară largă.Reprezintă navele care raportează prin AIS poziții care nu corespund locației lor reale, adesea plasându-le pe uscat în loc de mare.
+Zona Mării Negre este cunoscută pentru spoofing GPS pe scară largă. Navele raportează prin AIS poziții care nu corespund locației lor reale, adesea plasându-le pe uscat în loc de mare.
 
 Pentru a filtra acest fenomen, aplicația validează fiecare poziție primită împotriva unei geometrii land/sea (sursă: [Natural Earth](https://www.naturalearthdata.com/), rezoluție 1:50m), folosind [NetTopologySuite](https://github.com/NetTopologySuite/NetTopologySuite). Pozițiile care cad pe uscat sunt marcate `is_plausible = false`.
 
-**Detalii tehnice:** un punct este considerat pe uscat doar dacă se află **în interiorul** unui poligon de uscat, la o distanță de graniță mai mare decât un prag mic (~200m). Condiția combinată (interior + distanță minimă de graniță) reduce fals-pozitivele cauzate de simplificarea coastline-ului la rezoluție 1:50m, păstrând totuși detecția corectă pentru poziții clar eronate.
+**Detalii tehnice:** un punct este considerat pe uscat doar dacă se află **în interiorul** unui poligon de uscat, la o distanță de graniță mai mare decât un prag mic (0.002 grade, ~200m). Condiția combinată (interior + distanță minimă de graniță) reduce fals-pozitivele cauzate de simplificarea coastline-ului la rezoluție 1:50m, păstrând totuși detecția corectă pentru poziții clar eronate.
 
 ## Funcționalități
 
@@ -135,6 +169,7 @@ Pentru a filtra acest fenomen, aplicația validează fiecare poziție primită �
 - Upsert automat al ultimei poziții per navă
 - Salvare a istoricului complet de mișcare
 - Validare geografică a pozițiilor pentru detectarea GPS spoofing
+- Teste unitare pentru validarea geografică și logica de plauzibilitate
 - Reconectare automată la WebSocket în caz de întrerupere a conexiunii
 - Gestionare a erorilor de deserializare și de bază de date, fără oprirea programului
 - Hartă interactivă live, cu grupare vizuală (clustering) a navelor apropiate
