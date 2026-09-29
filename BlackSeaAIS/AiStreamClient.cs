@@ -2,18 +2,26 @@ using System.Data.Common;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
+
 public class AiStreamClient
 {
     private ClientWebSocket _client = new ClientWebSocket();
+
     public async Task ConnectAsync()
     {
+        // A new ClientWebSocket instance is required on every (re)connect —
+        // a closed/aborted ClientWebSocket cannot be reopened.
         _client = new ClientWebSocket();
         var uri = new Uri("wss://stream.aisstream.io/v0/stream");
         await _client.ConnectAsync(uri, CancellationToken.None);
         Console.WriteLine("Conectat: " + _client.State);
     }
+
     public async Task SubscribeAsync(string APIKey)
     {
+        // BoundingBoxes format per aisstream.io: an array of [lat, lon] corner pairs
+        // defining the region to receive AIS messages for. Here: the Black Sea area,
+        // from the northwest corner to the southeast corner.
         var conexiune = new
         {
             APIKey,
@@ -41,15 +49,23 @@ public class AiStreamClient
             }
             catch (Exception ex)
             {
+                // Malformed or unexpected message shape: skip this message but
+                // keep the connection alive rather than crashing the whole loop.
                 Console.WriteLine("Eroare la deserializare: " + ex.Message);
             }
 
             try
             {
+                // Only process actual position reports that include a ship name.
+                // Messages without a ShipName are skipped here (e.g. some position
+                // reports arrive before the ship's static data has been received).
                 if (aisMessage?.MessageType == "PositionReport" && aisMessage.Message?.PositionReport != null && !string.IsNullOrWhiteSpace(aisMessage.MetaData?.ShipName?.Trim() ?? ""))
                 {
                     var pr = aisMessage.Message.PositionReport;
                     var meta = aisMessage.MetaData;
+
+                    // aisstream.io timestamps arrive with a trailing " UTC" suffix
+                    // that DateTime.Parse doesn't accept, so it's stripped first.
                     var timeUtc = meta?.TimeUtc?.Replace(" UTC", "");
                     DateTime time = timeUtc != null ? DateTime.Parse(timeUtc) : DateTime.UtcNow;
                     await db.UpsertShip(meta!, pr, time);
@@ -58,6 +74,8 @@ public class AiStreamClient
             }
             catch (Exception ex)
             {
+                // A DB failure for one message shouldn't kill the receive loop —
+                // log it and keep processing the next incoming message.
                 Console.WriteLine("Eroare la baza de date: " + ex.Message);
             }
         }

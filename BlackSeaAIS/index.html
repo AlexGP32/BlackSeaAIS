@@ -20,6 +20,7 @@
     <script src ="js/leaflet.js"></script>
     <script src="js/leaflet.markercluster.js"></script>
     <script>
+        // Centered roughly on the Black Sea, zoom level chosen to show the whole region
         var map = L.map('map').setView([43.5, 34.5], 6);
         var markerClusterGroup = L.markerClusterGroup();
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
@@ -27,15 +28,22 @@
     </script>
     <script src = "js/supabase-js@2.js"></script>
     <script>
+        // Fetches the latest known position for every ship and redraws all markers.
+        // Called on load and re-run every 5 seconds (see setInterval below).
         function UpdateShips() {
             supabaseClient.from("ships").select("last_latitude, last_longitude, ship_name, mmsi, true_heading, is_plausible").then((result) => {
                 if (result.error) {
                     console.error("Eroare la returnarea datelor:", result.error);
                     return;
                 }
+                // Clear old markers before redrawing, otherwise ships pile up on every refresh
                 markerClusterGroup.clearLayers();
                 result.data.forEach((ship) => {
+                    // Show a warning badge on ships flagged as implausible
+                    // (likely GPS spoofing, position landed on shore)
                     const warningicon = ship.is_plausible ? '' : '<span style="position: absolute; top: -6px; left: -12px; right: -6px; font-size: 15px; pointer-events: none"; title="Datele nu sunt corecte (posibil pe uscat)">⚠️</span>';
+                    // Rotate the boat icon to match true_heading so ships point
+                    // in their actual direction of travel on the map
                     const rotatedIcon = L.divIcon({
                     html: `<div style = "position: relative;"> ${warningicon} <img src="pngs/boat.png" style="width: 50px; height: 50px; transform: rotate(${ship.true_heading}deg);" /></div>`,
                     iconSize: [50, 50],
@@ -47,7 +55,14 @@
                 });
             });
         }
+
+        // Keeps track of the currently drawn route so it can be removed
+        // before drawing a new one (only one route shown on the map at a time)
         var currentRoute = null;
+
+        // Draws the last 20 plausible positions for a given ship as a polyline,
+        // then zooms the map to fit the route. Implausible (spoofed) positions
+        // are excluded so the route doesn't jump onto land.
         function ShowRoute(mmsi){
             console.log("mmsi trimis:" , mmsi, typeof mmsi)
             supabaseClient.from("position_history")
@@ -65,6 +80,8 @@
                     alert("Nu există date pentru acest traseu.");
                     return;
                 }
+                // Data comes back newest-first (for the LIMIT to work correctly),
+                // so reverse it to draw the route in chronological order
                 const latlngs = result.data.reverse().map((position) => [position.latitude, position.longitude]);
                 if(currentRoute){
                     map.removeLayer(currentRoute);
@@ -74,8 +91,12 @@
                 currentRoute = polyline;
             });
         }
+
+        // Public anon key: safe to expose client-side, access is restricted
+        // by Supabase Row Level Security (RLS) policies on the "ships" and
+        // "position_history" tables (read-only SELECT, as set up in the README)
         const supabaseClient = window.supabase.createClient("https://meelehndrbaqdhmmvtip.supabase.co", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1lZWxlaG5kcmJhcWRobW12dGlwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg1MjM5ODUsImV4cCI6MjEwNDA5OTk4NX0.vlAMy013lam4PMHO4F0ReGmXO22HPmARDJoQO5u6Mak");
         UpdateShips();
         setInterval(UpdateShips, 5000);
     </script>
-</body> 
+</body>

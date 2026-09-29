@@ -11,14 +11,23 @@ public class DatabaseService
         _geoservice = geoservice;
     }
 
+    // Determines whether a reported position is plausible (i.e. not on land,
+    // which would indicate GPS spoofing). Exposed as internal so it can be
+    // unit tested independently of any database calls.
     internal bool DeterminePlausibility(PositionReport pr)
     {
         return !_geoservice.IsOnLand(pr.Latitude, pr.Longitude);
     }
 
+    // Updates the ship's latest known state. Behavior depends on plausibility:
+    // - Plausible position: full upsert, overwriting the ship's last known position.
+    // - Implausible position (likely spoofed): only flags the ship as implausible
+    //   and updates the timestamp, WITHOUT overwriting the last known good coordinates.
+    //   This keeps the map showing the ship's last trustworthy location instead of
+    //   a fake one on land.
     public async Task UpsertShip(MetaData meta, PositionReport pr, DateTime time)
     {
-        bool isPlausible = !_geoservice.IsOnLand(pr.Latitude, pr.Longitude);
+        bool isPlausible = DeterminePlausibility(pr);
         if (isPlausible)
         {
             var cmd = new NpgsqlCommand(@"INSERT INTO ships (mmsi, ship_name, last_latitude, last_longitude, sog, cog, true_heading, navigational_status, last_update, is_plausible) 
@@ -49,6 +58,8 @@ public class DatabaseService
         }
         else
         {
+            // last_latitude/last_longitude is not used here because we don't want to
+            // overwrite the ship's last trustworthy position with a spoofed one.
             var cmd = new NpgsqlCommand(@"UPDATE ships SET is_plausible = @is_plausible, last_update = @updated WHERE mmsi = @mmsi;", _conn);
             cmd.Parameters.AddWithValue("mmsi", meta.MMSI);
             cmd.Parameters.AddWithValue("is_plausible", isPlausible);
@@ -57,9 +68,13 @@ public class DatabaseService
         }
     }
 
+    // Appends a new row to the full position history for this ship, regardless
+    // of plausibility. Unlike UpsertShip, every received position is recorded here
+    // (marked with is_plausible) so the full movement history stays available for
+    // later analysis, even positions flagged as likely spoofed.
     public async Task InsertHistory(MetaData meta, PositionReport pr, DateTime time)
     {
-        bool isPlausible = !_geoservice.IsOnLand(pr.Latitude, pr.Longitude);
+        bool isPlausible = DeterminePlausibility(pr);
         var cmdHistory = new NpgsqlCommand(@"INSERT INTO position_history (mmsi, latitude, longitude, recorded_time, is_plausible) VALUES (@mmsi, @latitude, @longitude, @recorded_time, @is_plausible);", _conn);
         cmdHistory.Parameters.AddWithValue("mmsi", meta.MMSI);
         cmdHistory.Parameters.AddWithValue("latitude", pr.Latitude);

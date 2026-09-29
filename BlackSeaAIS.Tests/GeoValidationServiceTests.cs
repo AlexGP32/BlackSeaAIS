@@ -4,7 +4,7 @@ using System.Collections.Generic;
 
 public class GeoValidationServiceTests
 {
-    // Pătrat de "uscat" de la (0,0) la (1,1), în coordonate lon/lat
+    // A square "land" polygon from (0,0) to (1,1), in lon/lat coordinates
     private static GeoValidationService CreateServiceWithSquareLand()
     {
         var factory = new GeometryFactory();
@@ -20,6 +20,7 @@ public class GeoValidationServiceTests
         return new GeoValidationService(new List<Geometry> { square });
     }
 
+    // A point well outside and far from the land polygon should not be flagged as on land.
     [Fact]
     public void PointFarFromLand_IsNotOnLand()
     {
@@ -27,6 +28,7 @@ public class GeoValidationServiceTests
         Assert.False(service.IsOnLand(lat: 5, lon: 5));
     }
 
+    // A point at the center of the land polygon, well past the threshold, should be flagged as on land.
     [Fact]
     public void PointDeepInsideLand_IsOnLand()
     {
@@ -38,7 +40,7 @@ public class GeoValidationServiceTests
     public void PointJustInsideBoundary_BelowThreshold_IsNotOnLand()
     {
         var service = CreateServiceWithSquareLand();
-        // la 0.001 grade de graniță, sub pragul de 0.002 -> nu se consideră "pe uscat"
+        // 0.001 degrees from the boundary, below the 0.002 threshold -> not considered "on land"
         Assert.False(service.IsOnLand(lat: 0.001, lon: 0.5));
     }
 
@@ -46,10 +48,11 @@ public class GeoValidationServiceTests
     public void PointWellInsideBoundary_AboveThreshold_IsOnLand()
     {
         var service = CreateServiceWithSquareLand();
-        // la 0.01 grade de graniță, peste prag -> se consideră "pe uscat"
+        // 0.01 degrees from the boundary, above the threshold -> considered "on land"
         Assert.True(service.IsOnLand(lat: 0.01, lon: 0.5));
     }
 
+    // A point just outside the polygon, near the boundary, should not be flagged as on land.
     [Fact]
     public void PointOutsideLand_NearBoundary_IsNotOnLand()
     {
@@ -57,6 +60,7 @@ public class GeoValidationServiceTests
         Assert.False(service.IsOnLand(lat: -0.001, lon: 0.5));
     }
 
+    // With an empty list of land polygons, no point should ever be considered on land.
     [Fact]
     public void NoLandGeometries_IsNeverOnLand()
     {
@@ -67,7 +71,7 @@ public class GeoValidationServiceTests
     [Fact]
     public void LatLonOrder_Matters()
     {
-        // Dreptunghi: lon între 0 și 10, lat între 0 și 1 (asimetric, prinde inversarea)
+        // Rectangle: lon between 0 and 10, lat between 0 and 1 (asymmetric, catches lat/lon swaps)
         var factory = new GeometryFactory();
         var rect = factory.CreatePolygon(new[]
         {
@@ -79,14 +83,14 @@ public class GeoValidationServiceTests
         });
         var service = new GeoValidationService(new List<Geometry> { rect });
 
-        Assert.True(service.IsOnLand(lat: 0.5, lon: 5));   // în interior
-        Assert.False(service.IsOnLand(lat: 5, lon: 0.5));  // ordine inversată -> în afară
+        Assert.True(service.IsOnLand(lat: 0.5, lon: 5));   // inside
+        Assert.False(service.IsOnLand(lat: 5, lon: 0.5));  // swapped order -> outside
     }
 
     [Theory]
     [InlineData(0.5, 0.5, true)]
-    [InlineData(0.5, 0.999, false)]   // lângă marginea de est, sub prag
-    [InlineData(0.999, 0.5, false)]   // lângă marginea de nord, sub prag
+    [InlineData(0.5, 0.999, false)]   // near the east edge, below threshold
+    [InlineData(0.999, 0.5, false)]   // near the north edge, below threshold
     public void PointsNearEveryEdge_RespectThreshold(double lat, double lon, bool expected)
     {
         var service = CreateServiceWithSquareLand();

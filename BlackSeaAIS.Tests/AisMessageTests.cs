@@ -1,8 +1,13 @@
 using System.Text.Json;
 using Xunit;
 
+// Tests for deserializing AIS (Automatic Identification System) messages
+// received as JSON and mapped onto the AisMessage object.
 public class AisMessageTests
 {
+    // Happy path: complete JSON, all fields present.
+    // Verifies correct mapping of every property, across all 3 levels
+    // (AisMessage -> MetaData / Message -> PositionReport).
     [Fact]
     public void Deserialize_FullPositionReport_ParsesAllFieldsCorrectly()
     {
@@ -29,28 +34,34 @@ public class AisMessageTests
 
         var result = JsonSerializer.Deserialize<AisMessage>(json);
 
+        // Level 1 checks: the top-level object
         Assert.NotNull(result);
         Assert.Equal("PositionReport", result.MessageType);
 
+        // Level 2 checks: MetaData (ship identity + timestamp)
         Assert.NotNull(result.MetaData);
-        Assert.Equal(271234567, result.MetaData.MMSI);
+        Assert.Equal(271234567, result.MetaData.MMSI);          // unique ship ID
         Assert.Equal("TEST VESSEL", result.MetaData.ShipName);
         Assert.Equal("2026-09-24 10:15:30.000000000", result.MetaData.TimeUtc);
 
+        // Level 3 checks: PositionReport (navigation/position data)
         Assert.NotNull(result.Message);
         Assert.NotNull(result.Message.PositionReport);
-        Assert.Equal(12.5, result.Message.PositionReport.Sog);
-        Assert.Equal(180.3, result.Message.PositionReport.Cog);
-        Assert.Equal(179, result.Message.PositionReport.TrueHeading);
-        Assert.Equal(0, result.Message.PositionReport.NavigationalStatus);
+        Assert.Equal(12.5, result.Message.PositionReport.Sog);          // Speed over ground
+        Assert.Equal(180.3, result.Message.PositionReport.Cog);         // Course over ground (direction of travel)
+        Assert.Equal(179, result.Message.PositionReport.TrueHeading);   // Bow direction (compass heading)
+        Assert.Equal(0, result.Message.PositionReport.NavigationalStatus); // 0 = "under way using engine"
         Assert.Equal(44.1733, result.Message.PositionReport.Latitude);
         Assert.Equal(28.6383, result.Message.PositionReport.Longitude);
     }
 
+    // Many ships don't transmit ShipName on every AIS message (only
+    // periodically, via ShipStaticData). This test verifies that a missing
+    // field doesn't cause an error, it simply leaves the property null.
     [Fact]
     public void Deserialize_MissingShipName_ShipNameIsNull()
     {
-        // multe nave nu transmit ShipName pe fiecare mesaj
+        // many ships don't transmit ShipName on every message
         string json = """
         {
             "MessageType": "PositionReport",
@@ -75,14 +86,17 @@ public class AisMessageTests
 
         Assert.NotNull(result);
         Assert.NotNull(result.MetaData);
-        Assert.Null(result.MetaData.ShipName);
+        Assert.Null(result.MetaData.ShipName);       // field absent from JSON -> null, not an exception
         Assert.Equal(271234567, result.MetaData.MMSI);
     }
 
+    // An AIS message can be a type other than PositionReport (e.g. static
+    // ship data). In that case "Message" is empty, so PositionReport must
+    // be null, without throwing during deserialization.
     [Fact]
     public void Deserialize_DifferentMessageType_PositionReportIsNull()
     {
-        // alt tip de mesaj AIS (ex. ShipStaticData), fără PositionReport
+        // a different AIS message type (e.g. ShipStaticData), no PositionReport
         string json = """
         {
             "MessageType": "ShipStaticData",
@@ -99,10 +113,12 @@ public class AisMessageTests
 
         Assert.NotNull(result);
         Assert.Equal("ShipStaticData", result.MessageType);
-        Assert.NotNull(result.Message);
-        Assert.Null(result.Message.PositionReport);
+        Assert.NotNull(result.Message);           // the "Message" object exists...
+        Assert.Null(result.Message.PositionReport); // ...but has no position data inside
     }
 
+    // Robustness test: completely empty JSON. The object must still be
+    // created without errors, with every property left null (nothing populated).
     [Fact]
     public void Deserialize_EmptyJson_AllPropertiesAreNull()
     {
@@ -110,15 +126,19 @@ public class AisMessageTests
 
         var result = JsonSerializer.Deserialize<AisMessage>(json);
 
-        Assert.NotNull(result);
-        Assert.Null(result.MessageType);
+        Assert.NotNull(result);          // the object itself exists...
+        Assert.Null(result.MessageType); // ...but no property is populated
         Assert.Null(result.MetaData);
         Assert.Null(result.Message);
     }
 
+    // Verifies two edge-case values for TrueHeading (the ship's bow direction):
+    // 0 = north (a valid boundary case) and 511 = special AIS code meaning
+    // "heading not available" (not a real direction, just a conventional
+    // sentinel value). Both must be read correctly, without error.
     [Theory]
-    [InlineData(0)]      // sub navă, la Ecuator/Greenwich - caz de graniță valid
-    [InlineData(511)]    // 511 = valoare specială AIS pentru "heading indisponibil"
+    [InlineData(0)]      // 0 = heading due north, a valid value (boundary case)
+    [InlineData(511)]    // 511 = special AIS value for "heading not available"
     public void Deserialize_TrueHeadingEdgeValues_ParsesWithoutError(int heading)
     {
         string json = $$"""
@@ -140,10 +160,13 @@ public class AisMessageTests
         Assert.Equal(heading, result.Message.PositionReport.TrueHeading);
     }
 
+    // Verifies deserialization precision for a small negative decimal value
+    // (longitude in the western hemisphere). Checks that the sign and fine
+    // decimals (e.g. -0.001) aren't lost or rounded incorrectly during parsing.
     [Fact]
     public void Deserialize_NegativeLongitude_ParsesCorrectly()
     {
-        // longitudine negativă (emisferă vestică) - test de precizie double
+        // negative longitude (western hemisphere) - double precision test
         string json = """
         {
             "MessageType": "PositionReport",
