@@ -1,5 +1,7 @@
 # BlackSeaAIS
 
+Link live: https://alexgp32.github.io/BlackSeaAIS/
+
 ![BlackSeaAIS demo](demo.gif)
 
 ## Descriere
