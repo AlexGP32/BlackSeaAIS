@@ -68,8 +68,7 @@ public class AiStreamClient
                     // that DateTime.Parse doesn't accept, so it's stripped first.
                     var timeUtc = meta?.TimeUtc?.Replace(" UTC", "");
                     DateTime time = timeUtc != null ? DateTime.Parse(timeUtc) : DateTime.UtcNow;
-                    await db.UpsertShip(meta!, pr, time);
-                    await db.InsertHistory(meta!, pr, time);
+                    await db.SavePosition(meta!, pr, time);
                 }
             }
             catch (Exception ex)

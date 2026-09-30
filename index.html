@@ -1,11 +1,12 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <meta charset="UTF-8">
     <link rel="stylesheet" href="css/leaflet.css">
-    <link rel ="stylesheet" href="css/MarkerCluster.css">
-    <link rel ="stylesheet" href="css/MarkerCluster.Default.css">
+    <link rel="stylesheet" href="css/MarkerCluster.css">
+    <link rel="stylesheet" href="css/MarkerCluster.Default.css">
 <style>
-    html, body{
+    html, body {
         margin: 0;
         padding: 0;
     }
@@ -15,9 +16,9 @@
     }
 </style>
 </head>
-<body> 
-    <div id="map"> </div>
-    <script src ="js/leaflet.js"></script>
+<body>
+    <div id="map"></div>
+    <script src="js/leaflet.js"></script>
     <script src="js/leaflet.markercluster.js"></script>
     <script>
         // Centered roughly on the Black Sea, zoom level chosen to show the whole region
@@ -26,7 +27,7 @@
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
         markerClusterGroup.addTo(map);
     </script>
-    <script src = "js/supabase-js@2.js"></script>
+    <script src="js/supabase-js@2.js"></script>
     <script>
         // Fetches the latest known position for every ship and redraws all markers.
         // Called on load and re-run every 5 seconds (see setInterval below).
@@ -41,17 +42,18 @@
                 result.data.forEach((ship) => {
                     // Show a warning badge on ships flagged as implausible
                     // (likely GPS spoofing, position landed on shore)
-                    const warningicon = ship.is_plausible ? '' : '<span style="position: absolute; top: -6px; left: -12px; right: -6px; font-size: 15px; pointer-events: none"; title="Datele nu sunt corecte (posibil pe uscat)">⚠️</span>';
+                    const warningicon = ship.is_plausible ? '' : '<span style="position: absolute; top: -6px; left: -12px; right: -6px; font-size: 15px; pointer-events: none" title="Datele nu sunt corecte (posibil pe uscat)">⚠️</span>';
                     // Rotate the boat icon to match true_heading so ships point
                     // in their actual direction of travel on the map
                     const rotatedIcon = L.divIcon({
-                    html: `<div style = "position: relative;"> ${warningicon} <img src="pngs/boat.png" style="width: 50px; height: 50px; transform: rotate(${ship.true_heading}deg);" /></div>`,
-                    iconSize: [50, 50],
-                    iconAnchor: [25, 25],
-                    className: 'ship-icon'
+                        html: `<div style="position: relative;"> ${warningicon} <img src="pngs/boat.png" style="width: 50px; height: 50px; transform: rotate(${ship.true_heading}deg);" /></div>`,
+                        iconSize: [50, 50],
+                        iconAnchor: [25, 25],
+                        className: 'ship-icon'
                     });
-                    const marker = L.marker([ship.last_latitude, ship.last_longitude], {icon: rotatedIcon}).addTo(markerClusterGroup)
-                    .bindPopup(`Name: ${ship.ship_name}<br>MMSI: ${ship.mmsi}<br>Heading: ${ship.true_heading}<br><button onclick="ShowRoute(${ship.mmsi})">Vezi traseu</button>`);
+                    L.marker([ship.last_latitude, ship.last_longitude], { icon: rotatedIcon })
+                        .addTo(markerClusterGroup)
+                        .bindPopup(`Name: ${ship.ship_name}<br>MMSI: ${ship.mmsi}<br>Heading: ${ship.true_heading}<br><button onclick="ShowRoute(${ship.mmsi})">Vezi traseu</button>`);
                 });
             });
         }
@@ -59,36 +61,62 @@
         // Keeps track of the currently drawn route so it can be removed
         // before drawing a new one (only one route shown on the map at a time)
         var currentRoute = null;
+        // Separate layer for spoofed points so they can be cleared independently
+        var spoofLayer = L.layerGroup().addTo(map);
 
-        // Draws the last 20 plausible positions for a given ship as a polyline,
-        // then zooms the map to fit the route. Implausible (spoofed) positions
-        // are excluded so the route doesn't jump onto land.
-        function ShowRoute(mmsi){
-            console.log("mmsi trimis:" , mmsi, typeof mmsi)
-            supabaseClient.from("position_history")
-            .select("latitude, longitude, recorded_time")
-            .eq("mmsi", mmsi)
-            .eq("is_plausible", true)
-            .order("recorded_time", {ascending: false})
-            .limit(20)
-            .then((result) => {
-                if (result.error) {
-                    console.error("Eroare la returnarea datelor:", result.error);
+        // Draws the last 20 plausible positions for a ship as a blue polyline,
+        // and the last 20 implausible (spoofed) positions as red dots,
+        // then zooms the map to fit everything.
+        function ShowRoute(mmsi) {
+            // Clear whatever was drawn for the previous ship
+            if (currentRoute) {
+                map.removeLayer(currentRoute);
+                currentRoute = null;
+            }
+            spoofLayer.clearLayers();
+
+            const query = (plausible) => supabaseClient.from("position_history")
+                .select("latitude, longitude, recorded_time")
+                .eq("mmsi", mmsi)
+                .eq("is_plausible", plausible)
+                .order("recorded_time", { ascending: false })
+                .limit(20);
+
+            // Run both queries in parallel: good positions (route) and spoofed ones
+            Promise.all([query(true), query(false)]).then(([good, bad]) => {
+                if (good.error || bad.error) {
+                    console.error("Eroare la returnarea datelor:", good.error || bad.error);
                     return;
                 }
-                if(!result.data || result.data.length === 0){
+                if (good.data.length === 0 && bad.data.length === 0) {
                     alert("Nu există date pentru acest traseu.");
                     return;
                 }
-                // Data comes back newest-first (for the LIMIT to work correctly),
-                // so reverse it to draw the route in chronological order
-                const latlngs = result.data.reverse().map((position) => [position.latitude, position.longitude]);
-                if(currentRoute){
-                    map.removeLayer(currentRoute);
+
+                const allPoints = [];
+
+                // Blue route: data is newest-first (so LIMIT works), reverse for chronological order
+                if (good.data.length > 0) {
+                    const latlngs = good.data.reverse().map(p => [p.latitude, p.longitude]);
+                    currentRoute = L.polyline(latlngs, { color: 'blue' }).addTo(map);
+                    allPoints.push(...latlngs);
                 }
-                const polyline = L.polyline(latlngs, {color: 'blue'}).addTo(map);
-                map.fitBounds(polyline.getBounds());
-                currentRoute = polyline;
+
+                // Red dots for spoofed positions
+                bad.data.forEach((p) => {
+                    L.circleMarker([p.latitude, p.longitude], {
+                        radius: 7,
+                        color: 'red',
+                        fillColor: 'red',
+                        fillOpacity: 0.7
+                    })
+                    .bindPopup(`⚠️ Poziție suspectă<br>${new Date(p.recorded_time).toLocaleString()}`)
+                    .addTo(spoofLayer);
+                    allPoints.push([p.latitude, p.longitude]);
+                });
+
+                // Zoom so both the route and the fake points are visible
+                map.fitBounds(L.latLngBounds(allPoints), { padding: [40, 40] });
             });
         }
 
@@ -100,3 +128,4 @@
         setInterval(UpdateShips, 5000);
     </script>
 </body>
+</html>
