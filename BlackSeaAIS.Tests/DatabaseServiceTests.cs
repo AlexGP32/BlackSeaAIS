@@ -18,7 +18,8 @@ public class DatabaseServiceTests
 
         // Connection is never actually opened/used by DeterminePlausibility,
         // so a bare NpgsqlConnection instance is fine here.
-        var db = new DatabaseService(new NpgsqlConnection(), geo.Object);
+        var dummyDataSource = NpgsqlDataSource.Create("Host=dummy");
+        var db = new DatabaseService(dummyDataSource, geo.Object);
         var pr = new PositionReport { Latitude = 44.0, Longitude = 28.0 };
 
         // Act & Assert
@@ -34,7 +35,8 @@ public class DatabaseServiceTests
         var geo = new Mock<IGeoValidationService>();
         geo.Setup(g => g.IsOnLand(44.0, 28.0)).Returns(false);
 
-        var db = new DatabaseService(new NpgsqlConnection(), geo.Object);
+        var dummyDataSource = NpgsqlDataSource.Create("Host=dummy");
+        var db = new DatabaseService(dummyDataSource, geo.Object);
 
         // Act
         var result = db.DeterminePlausibility(new PositionReport { Latitude = 44.0, Longitude = 28.0 });
