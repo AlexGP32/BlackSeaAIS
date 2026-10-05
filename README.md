@@ -113,7 +113,7 @@ dotnet test
 Testele unitare acoperă:
 
 - **`GeoValidationService`**: detecția de uscat, folosind un poligon sintetic în loc de fișierul GeoJSON real (interior, exterior, prag de graniță, ordinea lat/lon, listă goală de poligoane)
-- **`DatabaseServiceTests   `**: logica de plauzibilitate, cu `IGeoValidationService` înlocuit printr-un mock (Moq)
+- **`DatabaseServiceTests`**: logica de plauzibilitate, cu `IGeoValidationService` înlocuit printr-un mock (Moq)
 - **`AisMessageTests`**: deserializarea mesajelor AIS
 
 Operațiile SQL din `UpsertShip` și `InsertHistory` nu sunt acoperite de teste unitare, pentru că cer o instanță Postgres reală.
