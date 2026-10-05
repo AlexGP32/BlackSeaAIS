@@ -80,10 +80,11 @@ Repetă aceeași policy și pentru tabelul `position_history`, altfel traseele n
 
 Creează un fișier `.env` în folderul `BlackSeaAIS/` (lângă `BlackSeaAIS.csproj`), cu următoarele variabile:
 
-| Variabilă           | Descriere                             |
-| ------------------- | ------------------------------------- |
-| `AISSTREAM_API_KEY` | Cheia API obținută de pe aisstream.io |
-| `PASSWORD`          | Parola bazei tale de date Supabase    |
+| Variabilă                    | Descriere                                                                                                                      |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `AISSTREAM_API_KEY`          | Cheia API obținută de pe aisstream.io                                                                                          |
+| `PASSWORD`                   | Parola bazei tale de date Supabase                                                                                             |
+| `SUPABASE_CONNECTION_STRING` | Connection string-ul complet Postgres (Supabase Dashboard → Settings → Database → Connection string, mod "Transaction pooler") |
 
 ### 5. Rulare aplicație
 
@@ -176,7 +177,7 @@ Pentru a filtra acest fenomen, aplicația validează fiecare poziție primită �
 - Gestionare a erorilor de deserializare și de bază de date, fără oprirea programului
 - Hartă interactivă live, cu grupare vizuală (clustering) a navelor apropiate
 - Rotația iconiței fiecărei nave în funcție de direcția reală de mișcare (true heading)
-- Afișare a traseului istoric al unei nave, la cerere (excluzând pozițiile implauzibile)
+- Afișare a traseului istoric al unei nave, la cerere (traseul este albastru, iar punctele implauzibile sunt marcate sub formă de cercuri roșii)
 - Avertisment vizual pentru navele cu poziții suspecte
 - Actualizare automată a hărții la fiecare 5 secunde
 
