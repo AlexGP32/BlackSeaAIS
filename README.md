@@ -179,3 +179,9 @@ Pentru a filtra acest fenomen, aplicația validează fiecare poziție primită �
 - Afișare a traseului istoric al unei nave, la cerere (excluzând pozițiile implauzibile)
 - Avertisment vizual pentru navele cu poziții suspecte
 - Actualizare automată a hărții la fiecare 5 secunde
+
+## Posibile limitări
+
+- Acuratețea detecției de uscat depinde de rezoluția fișierului GeoJSON, astfel unele poziții (ex. în porturi sau pe canale) pot fi marcate eronat ca fiind pe uscat, în ciuda marjei de toleranță.
+- Dependența de un API extern (aisstream.io) pentru recepționarea și actualizarea datelor.
+- Extinderea bazei de date pentru a monitoriza mai multe regiuni sau întreg globul ar cauza rapid probleme de stocare din cauza volumului masiv de istoric.
