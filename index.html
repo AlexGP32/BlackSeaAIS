@@ -34,7 +34,7 @@
         function UpdateShips() {
             supabaseClient.from("ships").select("last_latitude, last_longitude, ship_name, mmsi, true_heading, is_plausible").then((result) => {
                 if (result.error) {
-                    console.error("Eroare la returnarea datelor:", result.error);
+                    console.error("Error fetching ships:", result.error);
                     return;
                 }
                 // Clear old markers before redrawing, otherwise ships pile up on every refresh
@@ -42,7 +42,7 @@
                 result.data.forEach((ship) => {
                     // Show a warning badge on ships flagged as implausible
                     // (likely GPS spoofing, position landed on shore)
-                    const warningicon = ship.is_plausible ? '' : '<span style="position: absolute; top: -6px; left: -12px; right: -6px; font-size: 15px; pointer-events: none" title="Datele nu sunt corecte (posibil pe uscat)">⚠️</span>';
+                    const warningicon = ship.is_plausible ? '' : '<span style="position: absolute; top: -6px; left: -12px; right: -6px; font-size: 15px; pointer-events: none" title="Position looks wrong (possibly on land)">⚠️</span>';
                     // Rotate the boat icon to match true_heading so ships point
                     // in their actual direction of travel on the map
                     const rotatedIcon = L.divIcon({
@@ -53,7 +53,7 @@
                     });
                     L.marker([ship.last_latitude, ship.last_longitude], { icon: rotatedIcon })
                         .addTo(markerClusterGroup)
-                        .bindPopup(`Name: ${ship.ship_name}<br>MMSI: ${ship.mmsi}<br>Heading: ${ship.true_heading}<br><button onclick="ShowRoute(${ship.mmsi})">Vezi traseu</button>`);
+                        .bindPopup(`Name: ${ship.ship_name}<br>MMSI: ${ship.mmsi}<br>Heading: ${ship.true_heading}<br><button onclick="ShowRoute(${ship.mmsi})">Show route</button>`);
                 });
             });
         }
@@ -64,8 +64,18 @@
         // Separate layer for spoofed points so they can be cleared independently
         var spoofLayer = L.layerGroup().addTo(map);
 
-        // Draws the last 20 plausible positions for a ship as a blue polyline,
-        // and the last 20 implausible (spoofed) positions as red dots,
+        // If two consecutive plausible points are further apart in time than this,
+        // the line is broken instead of drawn straight between them. Otherwise a
+        // data gap (e.g. backend offline for days or data being received at a later date) would show up as a fake straight
+        // line crossing land.
+        const MAX_GAP_MS = 15 * 60 * 1000; // 15 minutes
+
+        // Only positions from this time window are shown, so old voyages
+        // are not mixed with the current one.
+        const ROUTE_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+        // Draws a ship's recent route as a blue polyline (broken at data gaps)
+        // and its implausible (spoofed) positions as red dots,
         // then zooms the map to fit everything.
         function ShowRoute(mmsi) {
             // Clear whatever was drawn for the previous ship
@@ -75,49 +85,68 @@
             }
             spoofLayer.clearLayers();
 
-            const query = (plausible) => supabaseClient.from("position_history")
-                .select("latitude, longitude, recorded_time")
+            const since = new Date(Date.now() - ROUTE_WINDOW_MS).toISOString();
+
+            // One query for all positions in the time window, plausible or not.
+            // Newest first so LIMIT keeps the most recent points.
+            supabaseClient.from("position_history")
+                .select("latitude, longitude, recorded_time, is_plausible")
                 .eq("mmsi", mmsi)
-                .eq("is_plausible", plausible)
+                .gte("recorded_time", since)
                 .order("recorded_time", { ascending: false })
-                .limit(20);
+                .limit(1000)
+                .then(({ data, error }) => {
+                    if (error) {
+                        console.error("Error fetching route:", error);
+                        return;
+                    }
+                    if (!data || data.length === 0) {
+                        alert("No route data for this ship in the last 24 hours.");
+                        return;
+                    }
 
-            // Run both queries in parallel: good positions (route) and spoofed ones
-            Promise.all([query(true), query(false)]).then(([good, bad]) => {
-                if (good.error || bad.error) {
-                    console.error("Eroare la returnarea datelor:", good.error || bad.error);
-                    return;
-                }
-                if (good.data.length === 0 && bad.data.length === 0) {
-                    alert("Nu există date pentru acest traseu.");
-                    return;
-                }
+                    const allPoints = [];
+                    const segments = [];   // list of continuous route pieces
+                    let current = [];      // piece being built
+                    let prevTime = null;   // time of the previous plausible point
 
-                const allPoints = [];
+                    // Reverse to chronological order (oldest first) for drawing
+                    data.reverse().forEach((p) => {
+                        const latlng = [p.latitude, p.longitude];
+                        allPoints.push(latlng);
 
-                // Blue route: data is newest-first (so LIMIT works), reverse for chronological order
-                if (good.data.length > 0) {
-                    const latlngs = good.data.reverse().map(p => [p.latitude, p.longitude]);
-                    currentRoute = L.polyline(latlngs, { color: 'blue' }).addTo(map);
-                    allPoints.push(...latlngs);
-                }
+                        // Implausible positions are shown as red dots and kept out of the line
+                        if (!p.is_plausible) {
+                            L.circleMarker(latlng, {
+                                radius: 7,
+                                color: 'red',
+                                fillColor: 'red',
+                                fillOpacity: 0.7
+                            })
+                            .bindPopup(`⚠️ Suspicious position<br>${new Date(p.recorded_time).toLocaleString()}`)
+                            .addTo(spoofLayer);
+                            return;
+                        }
 
-                // Red dots for spoofed positions
-                bad.data.forEach((p) => {
-                    L.circleMarker([p.latitude, p.longitude], {
-                        radius: 7,
-                        color: 'red',
-                        fillColor: 'red',
-                        fillOpacity: 0.7
-                    })
-                    .bindPopup(`⚠️ Poziție suspectă<br>${new Date(p.recorded_time).toLocaleString()}`)
-                    .addTo(spoofLayer);
-                    allPoints.push([p.latitude, p.longitude]);
+                        // Start a new line segment when there is a gap in the data
+                        const t = new Date(p.recorded_time).getTime();
+                        if (prevTime !== null && t - prevTime > MAX_GAP_MS) {
+                            segments.push(current);
+                            current = [];
+                        }
+                        current.push(latlng);
+                        prevTime = t;
+                    });
+                    if (current.length > 0) segments.push(current);
+
+                    // Leaflet draws an array of arrays as separate line pieces (multi-polyline)
+                    if (segments.length > 0) {
+                        currentRoute = L.polyline(segments, { color: 'blue' }).addTo(map);
+                    }
+
+                    // Zoom so the route and the suspicious points are all visible
+                    map.fitBounds(L.latLngBounds(allPoints), { padding: [40, 40] });
                 });
-
-                // Zoom so both the route and the fake points are visible
-                map.fitBounds(L.latLngBounds(allPoints), { padding: [40, 40] });
-            });
         }
 
         // Public anon key: safe to expose client-side, access is restricted
