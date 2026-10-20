@@ -1,11 +1,24 @@
+using System.Collections.Concurrent;
 using Npgsql;
 
 public class DatabaseService
 {
-    // NpgsqlDataSource is thread-safe and pools connections, so each operation
-    // opens its own short-lived connection instead of sharing a single one.
+    // Thread-safe connection pool for short-lived DB operations.
     private readonly NpgsqlDataSource _dataSource;
     private readonly IGeoValidationService _geoservice;
+
+    // Absolute speed threshold (knots) to detect GPS spoofing jumps.
+    private const double MaxSpeedKnots = 50;
+
+    // Maximum time delta for a valid speed calculation. Older gaps are treated as signal loss.
+    private static readonly TimeSpan MaxComparisonGap = TimeSpan.FromMinutes(30);
+
+    // Minimum distance threshold to filter out GPS noise for anchored ships.
+    private const double MinDistanceNm = 0.1;
+
+    // In-memory cache of the last PLAUSIBLE position per MMSI.
+    // Prevents continuous DB lookups and ensures spoofed points don't validate subsequent spoofed points.
+    private readonly ConcurrentDictionary<long, (double Lat, double Lon, DateTime Time)> _lastAccepted = new();
 
     public DatabaseService(NpgsqlDataSource dataSource, IGeoValidationService geoservice)
     {
@@ -13,35 +26,64 @@ public class DatabaseService
         _geoservice = geoservice;
     }
 
-    // A position is plausible if it is not on land; a ship reporting a position
-    // on land usually indicates GPS spoofing or bad data.
-    // Internal so it can be unit tested without touching the database.
+    // Baseline validation: positions on land indicate bad data or spoofing.
     internal bool DeterminePlausibility(PositionReport pr)
     {
         return !_geoservice.IsOnLand(pr.Latitude, pr.Longitude);
     }
 
-    // Npgsql requires DateTime values with Kind=Utc for timestamptz columns.
+    // Hybrid validation: Combines geometric land checks with kinematic (speed/distance) heuristics.
+    // Bypasses false-positive land intersections (e.g., narrow canals, Varna lake) if movement is consistent.
+    internal bool DeterminePlausibility(MetaData meta, PositionReport pr, DateTime time)
+    {
+        bool plausible = DeterminePlausibility(pr);
+
+        if (!_lastAccepted.TryGetValue(meta.MMSI, out var last))
+            return plausible;
+
+        TimeSpan gap = AsUtc(time) - last.Time;
+        if (gap <= TimeSpan.Zero || gap > MaxComparisonGap)
+            return plausible; // Out-of-order message or stale reference
+
+        double distanceNm = GeoMath.DistanceNm(last.Lat, last.Lon, pr.Latitude, pr.Longitude);
+
+        if (distanceNm < MinDistanceNm)
+            return true; // Noise threshold
+
+        if (GeoMath.SpeedKnots(distanceNm, gap) > MaxSpeedKnots)
+            return false; // Impossible speed jump
+
+        return true; // Consistent kinematic movement overrides low-res polygon land hits
+    }
+
     private static DateTime AsUtc(DateTime time) =>
         time.Kind == DateTimeKind.Unspecified
             ? DateTime.SpecifyKind(time, DateTimeKind.Utc)
             : time.ToUniversalTime();
 
-    // Entry point for every received position report. Plausibility is computed
-    // once (the geographic check can be expensive) and reused by both writes.
+    // Caches the latest valid position. Ignores out-of-order stale messages.
+    internal void RememberAccepted(MetaData meta, PositionReport pr, DateTime time)
+    {
+        var t = AsUtc(time);
+        _lastAccepted.AddOrUpdate(
+            meta.MMSI,
+            _ => (pr.Latitude, pr.Longitude, t),
+            (_, existing) => t > existing.Time ? (pr.Latitude, pr.Longitude, t) : existing);
+    }
+
     public async Task SavePosition(MetaData meta, PositionReport pr, DateTime time)
     {
-        bool isPlausible = DeterminePlausibility(pr);
+        bool isPlausible = DeterminePlausibility(meta, pr, time);
+
+        if (isPlausible)
+            RememberAccepted(meta, pr, time);
+
         await UpsertShip(meta, pr, time, isPlausible);
         await InsertHistory(meta, pr, time, isPlausible);
     }
 
-    // Updates the ship's current state (table "ships"):
-    // - Plausible position: full upsert, overwriting the last known position.
-    // - Implausible position: only flags the ship and updates the timestamp,
-    //   keeping the last trustworthy coordinates so the map never shows a fake
-    //   location. If the ship has no row yet, nothing is updated, so it appears
-    //   only after its first plausible report.
+    // Updates live ship state. 
+    // Implausible updates only flag the anomaly without mutating the last known good coordinates.
     public async Task UpsertShip(MetaData meta, PositionReport pr, DateTime time, bool isPlausible)
     {
         var updated = AsUtc(time);
@@ -62,6 +104,7 @@ public class DatabaseService
                     navigational_status = EXCLUDED.navigational_status,
                     last_update = EXCLUDED.last_update,
                     is_plausible = EXCLUDED.is_plausible;");
+
             cmd.Parameters.AddWithValue("mmsi", meta.MMSI);
             cmd.Parameters.AddWithValue("name", meta.ShipName?.Trim() ?? "");
             cmd.Parameters.AddWithValue("lat", pr.Latitude);
@@ -72,6 +115,7 @@ public class DatabaseService
             cmd.Parameters.AddWithValue("navstatus", pr.NavigationalStatus);
             cmd.Parameters.AddWithValue("updated", updated);
             cmd.Parameters.AddWithValue("is_plausible", isPlausible);
+
             await cmd.ExecuteNonQueryAsync();
         }
         else
@@ -81,22 +125,24 @@ public class DatabaseService
             cmd.Parameters.AddWithValue("mmsi", meta.MMSI);
             cmd.Parameters.AddWithValue("is_plausible", isPlausible);
             cmd.Parameters.AddWithValue("updated", updated);
+
             await cmd.ExecuteNonQueryAsync();
         }
     }
 
-    // Appends every received position to the full history (table "position_history"),
-    // flagged with its plausibility, so spoofed positions remain available for analysis.
+    // Appends all records to history for offline spoofing analysis.
     public async Task InsertHistory(MetaData meta, PositionReport pr, DateTime time, bool isPlausible)
     {
         await using var cmd = _dataSource.CreateCommand(
             "INSERT INTO position_history (mmsi, latitude, longitude, recorded_time, is_plausible) " +
             "VALUES (@mmsi, @latitude, @longitude, @recorded_time, @is_plausible);");
+
         cmd.Parameters.AddWithValue("mmsi", meta.MMSI);
         cmd.Parameters.AddWithValue("latitude", pr.Latitude);
         cmd.Parameters.AddWithValue("longitude", pr.Longitude);
         cmd.Parameters.AddWithValue("recorded_time", AsUtc(time));
         cmd.Parameters.AddWithValue("is_plausible", isPlausible);
+
         await cmd.ExecuteNonQueryAsync();
     }
 }

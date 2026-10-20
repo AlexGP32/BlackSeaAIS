@@ -29,50 +29,72 @@
     </script>
     <script src="js/supabase-js@2.js"></script>
     <script>
-        // Fetches the latest known position for every ship and redraws all markers.
-        // Called on load and re-run every 5 seconds (see setInterval below).
-        function UpdateShips() {
-            supabaseClient.from("ships").select("last_latitude, last_longitude, ship_name, mmsi, true_heading, is_plausible").then((result) => {
-                if (result.error) {
-                    console.error("Error fetching ships:", result.error);
-                    return;
-                }
-                // Clear old markers before redrawing, otherwise ships pile up on every refresh
-                markerClusterGroup.clearLayers();
-                result.data.forEach((ship) => {
-                    // Show a warning badge on ships flagged as implausible
-                    // (likely GPS spoofing, position landed on shore)
-                    const warningicon = ship.is_plausible ? '' : '<span style="position: absolute; top: -6px; left: -12px; right: -6px; font-size: 15px; pointer-events: none" title="Position looks wrong (possibly on land)">⚠️</span>';
-                    // Rotate the boat icon to match true_heading so ships point
-                    // in their actual direction of travel on the map
-                    const rotatedIcon = L.divIcon({
-                        html: `<div style="position: relative;"> ${warningicon} <img src="pngs/boat.png" style="width: 50px; height: 50px; transform: rotate(${ship.true_heading}deg);" /></div>`,
-                        iconSize: [50, 50],
-                        iconAnchor: [25, 25],
-                        className: 'ship-icon'
-                    });
-                    L.marker([ship.last_latitude, ship.last_longitude], { icon: rotatedIcon })
-                        .addTo(markerClusterGroup)
-                        .bindPopup(`Name: ${ship.ship_name}<br>MMSI: ${ship.mmsi}<br>Heading: ${ship.true_heading}<br><button onclick="ShowRoute(${ship.mmsi})">Show route</button>`);
-                });
-            });
-        }
 
+        // Ships not seen for longer than this are not shown on the map at all
+        const SHIP_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+        // Ships seen within this window are "live"; older ones are faded,
+        // because their last known position may be outdated
+        const SHIP_LIVE_MS = 60 * 60 * 1000; // 1 hour
+
+        // Only positions from this time window are used when drawing a route,
+        // so old voyages are not mixed with the current one
+        const ROUTE_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+        // Maximum number of points fetched for one route
+        // (Supabase returns at most 1000 rows per request by default)
+        const ROUTE_MAX_POINTS = 1000;
+
+        // If two consecutive plausible points are further apart in time than this,
+        // the line is broken instead of drawn straight between them. Otherwise a
+        // data gap (e.g. ship out of receiver range) would show up as a fake
+        // straight line crossing land.
+        const ROUTE_MAX_GAP_MS = 15 * 60 * 1000; // 15 minutes
+
+        // Fetches ships seen in the last 24 hours and redraws all markers.
+        // Called on load and re-run every 5 seconds.
+        function UpdateShips() {
+            const now = Date.now();
+            const since = new Date(now - SHIP_MAX_AGE_MS).toISOString();
+
+            supabaseClient.from("ships")
+                .select("last_latitude, last_longitude, ship_name, mmsi, true_heading, is_plausible, last_update")
+                .gte("last_update", since) // skip ships that have not been seen for 24 hours
+                .then((result) => {
+                    if (result.error) {
+                        console.error("Error fetching ships:", result.error);
+                        return;
+                    }
+                    // Clear old markers before redrawing, otherwise ships pile up on every refresh
+                    markerClusterGroup.clearLayers();
+                    result.data.forEach((ship) => {
+                        // Fade ships that were not seen for over an hour
+                        const isLive = (now - new Date(ship.last_update).getTime()) <= SHIP_LIVE_MS;
+                        const opacity = isLive ? 1 : 0.35;
+
+                        // Show a warning badge on ships flagged as implausible
+                        // (likely GPS spoofing, position landed on shore)
+                        const warningicon = ship.is_plausible ? '' : '<span style="position: absolute; top: -6px; left: -12px; right: -6px; font-size: 15px; pointer-events: none" title="Position looks wrong (possibly on land)">⚠️</span>';
+
+                        // Rotate the boat icon to match true_heading so ships point
+                        // in their actual direction of travel on the map
+                        const rotatedIcon = L.divIcon({
+                            html: `<div style="position: relative;"> ${warningicon} <img src="pngs/boat.png" style="width: 50px; height: 50px; opacity: ${opacity}; transform: rotate(${ship.true_heading}deg);" /></div>`,
+                            iconSize: [50, 50],
+                            iconAnchor: [25, 25],
+                            className: 'ship-icon'
+                        });
+                        L.marker([ship.last_latitude, ship.last_longitude], { icon: rotatedIcon })
+                            .addTo(markerClusterGroup)
+                            .bindPopup(`Name: ${ship.ship_name}<br>MMSI: ${ship.mmsi}<br>Heading: ${ship.true_heading}<br>Last seen: ${new Date(ship.last_update).toLocaleString()}<br><button onclick="ShowRoute(${ship.mmsi})">Show route</button>`);
+                    });
+                });
+        }
         // Keeps track of the currently drawn route so it can be removed
         // before drawing a new one (only one route shown on the map at a time)
         var currentRoute = null;
         // Separate layer for spoofed points so they can be cleared independently
         var spoofLayer = L.layerGroup().addTo(map);
-
-        // If two consecutive plausible points are further apart in time than this,
-        // the line is broken instead of drawn straight between them. Otherwise a
-        // data gap (e.g. backend offline for days or data being received at a later date) would show up as a fake straight
-        // line crossing land.
-        const MAX_GAP_MS = 15 * 60 * 1000; // 15 minutes
-
-        // Only positions from this time window are shown, so old voyages
-        // are not mixed with the current one.
-        const ROUTE_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
 
         // Draws a ship's recent route as a blue polyline (broken at data gaps)
         // and its implausible (spoofed) positions as red dots,
@@ -94,7 +116,7 @@
                 .eq("mmsi", mmsi)
                 .gte("recorded_time", since)
                 .order("recorded_time", { ascending: false })
-                .limit(1000)
+                .limit(ROUTE_MAX_POINTS)
                 .then(({ data, error }) => {
                     if (error) {
                         console.error("Error fetching route:", error);
@@ -130,7 +152,7 @@
 
                         // Start a new line segment when there is a gap in the data
                         const t = new Date(p.recorded_time).getTime();
-                        if (prevTime !== null && t - prevTime > MAX_GAP_MS) {
+                        if (prevTime !== null && t - prevTime > ROUTE_MAX_GAP_MS) {
                             segments.push(current);
                             current = [];
                         }
@@ -139,10 +161,25 @@
                     });
                     if (current.length > 0) segments.push(current);
 
-                    // Leaflet draws an array of arrays as separate line pieces (multi-polyline)
+                    // Thin, semi-transparent line so the dots stay visible on top of it
                     if (segments.length > 0) {
-                        currentRoute = L.polyline(segments, { color: 'blue' }).addTo(map);
+                        currentRoute = L.polyline(segments, { color: 'blue', weight: 2, opacity: 0.5 }).addTo(map);
                     }
+
+                    // Dots with a white outline, drawn above the line
+                    data.forEach((p) => {
+                        if (p.is_plausible) {
+                            L.circleMarker([p.latitude, p.longitude], {
+                                radius: 4,
+                                color: 'white',
+                                weight: 1,
+                                fillColor: '#ff8800',
+                                fillOpacity: 1
+                            })
+                            .bindPopup(new Date(p.recorded_time).toLocaleString())
+                            .addTo(spoofLayer);
+                        }
+                    }); 
 
                     // Zoom so the route and the suspicious points are all visible
                     map.fitBounds(L.latLngBounds(allPoints), { padding: [40, 40] });
