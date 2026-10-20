@@ -1,0 +1,21 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": { "name": "Varna Canal Safe Zone" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [27.75, 43.18],
+            [27.95, 43.18],
+            [27.95, 43.22],
+            [27.75, 43.22],
+            [27.75, 43.18]
+          ]
+        ]
+      }
+    }
+  ]
+}
