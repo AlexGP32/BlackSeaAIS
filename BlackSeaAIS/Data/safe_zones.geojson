@@ -3,16 +3,16 @@
   "features": [
     {
       "type": "Feature",
-      "properties": { "name": "Varna Canal Safe Zone" },
+      "properties": { "name": "Varna-Beloslav Lakes and Canal Safe Zone" },
       "geometry": {
         "type": "Polygon",
         "coordinates": [
           [
-            [27.75, 43.18],
-            [27.95, 43.18],
-            [27.95, 43.22],
-            [27.75, 43.22],
-            [27.75, 43.18]
+            [27.64, 43.20],
+            [28.05, 43.08],
+            [28.05, 43.25],
+            [27.60, 43.25],
+            [27.60, 43.08]
           ]
         ]
       }

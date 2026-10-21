@@ -21,86 +21,76 @@
     <script src="js/leaflet.js"></script>
     <script src="js/leaflet.markercluster.js"></script>
     <script>
-        // Centered roughly on the Black Sea, zoom level chosen to show the whole region
-        var map = L.map('map').setView([43.5, 34.5], 6);
-        var markerClusterGroup = L.markerClusterGroup();
+        // Force Canvas rendering to support thousands of path points without DOM lag
+        var map = L.map('map', { preferCanvas: true }).setView([43.5, 34.5], 6);
+        
+        // Chunked loading prevents UI freezing when rendering massive clusters
+        var markerClusterGroup = L.markerClusterGroup({ chunkedLoading: true });
+        
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
         markerClusterGroup.addTo(map);
     </script>
     <script src="js/supabase-js@2.js"></script>
     <script>
 
-        // Ships not seen for longer than this are not shown on the map at all
-        const SHIP_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
-
-        // Ships seen within this window are "live"; older ones are faded,
-        // because their last known position may be outdated
-        const SHIP_LIVE_MS = 60 * 60 * 1000; // 1 hour
-
-        // Only positions from this time window are used when drawing a route,
-        // so old voyages are not mixed with the current one
-        const ROUTE_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
-
-        // Maximum number of points fetched for one route
-        // (Supabase returns at most 1000 rows per request by default)
+        // Retention thresholds
+        const SHIP_MAX_AGE_MS = 24 * 60 * 60 * 1000; // Drop ships unseen for 24h
+        const SHIP_LIVE_MS = 60 * 60 * 1000;         // Fade out ships unseen for 1h
+        const ROUTE_WINDOW_MS = 24 * 60 * 60 * 1000; // Constrain historical routes to 24h
+        
+        // Pagination limit for trajectory points
         const ROUTE_MAX_POINTS = 1000;
 
-        // If two consecutive plausible points are further apart in time than this,
-        // the line is broken instead of drawn straight between them. Otherwise a
-        // data gap (e.g. ship out of receiver range) would show up as a fake
-        // straight line crossing land.
-        const ROUTE_MAX_GAP_MS = 15 * 60 * 1000; // 15 minutes
+        // Break polylines if time gap exceeds 15m to prevent false land-crossing lines during signal loss
+        const ROUTE_MAX_GAP_MS = 15 * 60 * 1000; 
 
-        // Fetches ships seen in the last 24 hours and redraws all markers.
-        // Called on load and re-run every 5 seconds.
+        // Fetches and bulk-renders active ships
         function UpdateShips() {
             const now = Date.now();
             const since = new Date(now - SHIP_MAX_AGE_MS).toISOString();
 
             supabaseClient.from("ships")
                 .select("last_latitude, last_longitude, ship_name, mmsi, true_heading, is_plausible, last_update")
-                .gte("last_update", since) // skip ships that have not been seen for 24 hours
+                .gte("last_update", since)
                 .then((result) => {
                     if (result.error) {
                         console.error("Error fetching ships:", result.error);
                         return;
                     }
-                    // Clear old markers before redrawing, otherwise ships pile up on every refresh
+                    
                     markerClusterGroup.clearLayers();
+                    const newMarkers = [];
+
                     result.data.forEach((ship) => {
-                        // Fade ships that were not seen for over an hour
                         const isLive = (now - new Date(ship.last_update).getTime()) <= SHIP_LIVE_MS;
                         const opacity = isLive ? 1 : 0.35;
 
-                        // Show a warning badge on ships flagged as implausible
-                        // (likely GPS spoofing, position landed on shore)
-                        const warningicon = ship.is_plausible ? '' : '<span style="position: absolute; top: -6px; left: -12px; right: -6px; font-size: 15px; pointer-events: none" title="Position looks wrong (possibly on land)">⚠️</span>';
+                        // Visual flag for anomalous positions bypassing kinematic checks
+                        const warningicon = ship.is_plausible ? '' : '<span style="position: absolute; top: -6px; left: -12px; right: -6px; font-size: 15px; pointer-events: none" title="Suspicious position">⚠️</span>';
 
-                        // Rotate the boat icon to match true_heading so ships point
-                        // in their actual direction of travel on the map
                         const rotatedIcon = L.divIcon({
                             html: `<div style="position: relative;"> ${warningicon} <img src="pngs/boat.png" style="width: 50px; height: 50px; opacity: ${opacity}; transform: rotate(${ship.true_heading}deg);" /></div>`,
                             iconSize: [50, 50],
                             iconAnchor: [25, 25],
                             className: 'ship-icon'
                         });
-                        L.marker([ship.last_latitude, ship.last_longitude], { icon: rotatedIcon })
-                            .addTo(markerClusterGroup)
+
+                        const marker = L.marker([ship.last_latitude, ship.last_longitude], { icon: rotatedIcon })
                             .bindPopup(`Name: ${ship.ship_name}<br>MMSI: ${ship.mmsi}<br>Heading: ${ship.true_heading}<br>Last seen: ${new Date(ship.last_update).toLocaleString()}<br><button onclick="ShowRoute(${ship.mmsi})">Show route</button>`);
+                        
+                        newMarkers.push(marker);
                     });
+
+                    // Bulk insert optimizes cluster geometry calculations
+                    markerClusterGroup.addLayers(newMarkers);
                 });
         }
-        // Keeps track of the currently drawn route so it can be removed
-        // before drawing a new one (only one route shown on the map at a time)
+        
         var currentRoute = null;
-        // Separate layer for spoofed points so they can be cleared independently
         var spoofLayer = L.layerGroup().addTo(map);
 
-        // Draws a ship's recent route as a blue polyline (broken at data gaps)
-        // and its implausible (spoofed) positions as red dots,
-        // then zooms the map to fit everything.
+        // Draws historical trajectory (blue) and isolated anomalous points (red)
         function ShowRoute(mmsi) {
-            // Clear whatever was drawn for the previous ship
             if (currentRoute) {
                 map.removeLayer(currentRoute);
                 currentRoute = null;
@@ -109,8 +99,6 @@
 
             const since = new Date(Date.now() - ROUTE_WINDOW_MS).toISOString();
 
-            // One query for all positions in the time window, plausible or not.
-            // Newest first so LIMIT keeps the most recent points.
             supabaseClient.from("position_history")
                 .select("latitude, longitude, recorded_time, is_plausible")
                 .eq("mmsi", mmsi)
@@ -128,16 +116,15 @@
                     }
 
                     const allPoints = [];
-                    const segments = [];   // list of continuous route pieces
-                    let current = [];      // piece being built
-                    let prevTime = null;   // time of the previous plausible point
+                    const segments = [];
+                    let current = [];
+                    let prevTime = null;
 
-                    // Reverse to chronological order (oldest first) for drawing
                     data.reverse().forEach((p) => {
                         const latlng = [p.latitude, p.longitude];
                         allPoints.push(latlng);
 
-                        // Implausible positions are shown as red dots and kept out of the line
+                        // Segregate implausible points from the main trajectory
                         if (!p.is_plausible) {
                             L.circleMarker(latlng, {
                                 radius: 7,
@@ -150,7 +137,7 @@
                             return;
                         }
 
-                        // Start a new line segment when there is a gap in the data
+                        // Segment break on signal gap
                         const t = new Date(p.recorded_time).getTime();
                         if (prevTime !== null && t - prevTime > ROUTE_MAX_GAP_MS) {
                             segments.push(current);
@@ -159,14 +146,14 @@
                         current.push(latlng);
                         prevTime = t;
                     });
+                    
                     if (current.length > 0) segments.push(current);
 
-                    // Thin, semi-transparent line so the dots stay visible on top of it
                     if (segments.length > 0) {
                         currentRoute = L.polyline(segments, { color: 'blue', weight: 2, opacity: 0.5 }).addTo(map);
                     }
 
-                    // Dots with a white outline, drawn above the line
+                    // Overlay plausible points
                     data.forEach((p) => {
                         if (p.is_plausible) {
                             L.circleMarker([p.latitude, p.longitude], {
@@ -181,17 +168,16 @@
                         }
                     }); 
 
-                    // Zoom so the route and the suspicious points are all visible
                     map.fitBounds(L.latLngBounds(allPoints), { padding: [40, 40] });
                 });
         }
 
-        // Public anon key: safe to expose client-side, access is restricted
-        // by Supabase Row Level Security (RLS) policies on the "ships" and
-        // "position_history" tables (read-only SELECT, as set up in the README)
+        // Public anon key (read-only RLS secured)
         const supabaseClient = window.supabase.createClient("https://meelehndrbaqdhmmvtip.supabase.co", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1lZWxlaG5kcmJhcWRobW12dGlwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg1MjM5ODUsImV4cCI6MjEwNDA5OTk4NX0.vlAMy013lam4PMHO4F0ReGmXO22HPmARDJoQO5u6Mak");
+        
         UpdateShips();
-        setInterval(UpdateShips, 5000);
+        // Increased refresh interval to 15s to prevent UX disruption (popup closures)
+        setInterval(UpdateShips, 15000);
     </script>
 </body>
 </html>

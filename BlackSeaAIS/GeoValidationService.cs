@@ -48,6 +48,9 @@ public class GeoValidationService : IGeoValidationService
     {
         if (_landPolygons.Count == 0) return false;
 
+        if (IsInSafeZone(lat, lon))
+            return false; // Safe zones override land polygons
+
         var point = new Point(lon, lat);
         return _landPolygons.Any(g => g.Contains(point) && g.Boundary.Distance(point) > _insideLandThresholdDegrees);
     }
