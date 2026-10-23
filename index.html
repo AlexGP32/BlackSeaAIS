@@ -65,7 +65,7 @@
                         const isLive = (now - new Date(ship.last_update).getTime()) <= SHIP_LIVE_MS;
                         const opacity = isLive ? 1 : 0.35;
 
-                        // Visual flag for anomalous positions bypassing kinematic checks
+                        // Visual flag for anomalous positions
                         const warningicon = ship.is_plausible ? '' : '<span style="position: absolute; top: -6px; left: -12px; right: -6px; font-size: 15px; pointer-events: none" title="Suspicious position">⚠️</span>';
 
                         const rotatedIcon = L.divIcon({
