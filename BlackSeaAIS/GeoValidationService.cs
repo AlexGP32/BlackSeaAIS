@@ -34,9 +34,15 @@ public class GeoValidationService : IGeoValidationService
 
     private static List<Geometry> LoadPolygonsFromFile(string path)
     {
-        if (!File.Exists(path))
-            return new List<Geometry>();
+        Console.WriteLine($"[GeoValidationService] Attempting to load polygons from: {path}");
 
+        if (!File.Exists(path))
+        {
+            Console.WriteLine($"[GeoValidationService] WARNING: File NOT FOUND at {path}. Returning empty list.");
+            return new List<Geometry>();
+        }
+
+        Console.WriteLine($"[GeoValidationService] SUCCESS: File found and loaded from {path}.");
         var json = File.ReadAllText(path);
         var reader = new NetTopologySuite.IO.GeoJsonReader();
         var featureCollection = reader.Read<FeatureCollection>(json);

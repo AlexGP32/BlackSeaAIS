@@ -12,7 +12,7 @@
     <None Update="Data\black_sea_land.geojson">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Update="Data\black_sea_ocean.geojson">
+    <None Update="Data\safe_zones.geojson">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>
