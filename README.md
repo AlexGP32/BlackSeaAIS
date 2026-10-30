@@ -180,7 +180,7 @@ Safe Zones Exception: Because low-resolution maps can cause false positives in n
 
 - Live connection to the AIS stream, filtered by a bounding box in the Black Sea
 - Deserialization of AIS messages into strongly typed C# objects
-- Automatic CI/CD pipeline deployment via GitHub Actions to a Linux production environment
+- Automatic CI/CD pipeline deployment via GitHub Actions
 - Service execution managed via a systemd daemon for background processing and auto-restarts
 - Automatic upsert of each ship's last position
 - Saving of the complete movement history
