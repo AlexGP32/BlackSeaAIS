@@ -105,7 +105,7 @@ dotnet run
 1. Open `index.html` with a local server (e.g., the **Live Server** extension in VS Code).
 2. If using your own Supabase project, replace the URL and `anon` key in `index.html` with yours (Supabase Dashboard → Settings → API).
 
-The map updates automatically every 5 seconds, showing the last known position of each ship. A ship's route ("View Route" button in the popup) automatically excludes positions marked as implausible.
+The map updates automatically every 15 seconds, showing the last known position of each ship. A ship's route ("View Route" button in the popup) automatically excludes positions marked as implausible.
 
 ## Tests
 
@@ -195,7 +195,7 @@ Safe Zones Exception: Because low-resolution maps can cause false positives in n
 - Rotation of each ship's icon based on its true heading
 - Historical route display for a ship upon request (valid routes in blue, implausible points marked as red circles)
 - Visual warnings for ships with suspicious positions
-- Automatic map updates every 5 seconds
+- Automatic map updates every 15 seconds
 
 ## Known Limitations
 
