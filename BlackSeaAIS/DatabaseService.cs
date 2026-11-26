@@ -71,20 +71,20 @@ public class DatabaseService
             (_, existing) => t > existing.Time ? (pr.Latitude, pr.Longitude, t) : existing);
     }
 
-    public async Task SavePosition(MetaData meta, PositionReport pr, DateTime time)
+    public async Task SavePosition(MetaData meta, PositionReport pr, DateTime time, CancellationToken ct = default)
     {
         bool isPlausible = DeterminePlausibility(meta, pr, time);
 
         if (isPlausible)
             RememberAccepted(meta, pr, time);
 
-        await UpsertShip(meta, pr, time, isPlausible);
-        await InsertHistory(meta, pr, time, isPlausible);
+        await UpsertShip(meta, pr, time, isPlausible, ct);
+        await InsertHistory(meta, pr, time, isPlausible, ct);
     }
 
     // Updates live ship state. 
     // Implausible updates only flag the anomaly without mutating the last known good coordinates.
-    public async Task UpsertShip(MetaData meta, PositionReport pr, DateTime time, bool isPlausible)
+    public async Task UpsertShip(MetaData meta, PositionReport pr, DateTime time, bool isPlausible, CancellationToken ct = default)
     {
         var updated = AsUtc(time);
 
@@ -116,7 +116,7 @@ public class DatabaseService
             cmd.Parameters.AddWithValue("updated", updated);
             cmd.Parameters.AddWithValue("is_plausible", isPlausible);
 
-            await cmd.ExecuteNonQueryAsync();
+            await cmd.ExecuteNonQueryAsync(ct);
         }
         else
         {
@@ -126,12 +126,12 @@ public class DatabaseService
             cmd.Parameters.AddWithValue("is_plausible", isPlausible);
             cmd.Parameters.AddWithValue("updated", updated);
 
-            await cmd.ExecuteNonQueryAsync();
+            await cmd.ExecuteNonQueryAsync(ct);
         }
     }
 
     // Appends all records to history for offline spoofing analysis.
-    public async Task InsertHistory(MetaData meta, PositionReport pr, DateTime time, bool isPlausible)
+    public async Task InsertHistory(MetaData meta, PositionReport pr, DateTime time, bool isPlausible, CancellationToken ct = default)
     {
         await using var cmd = _dataSource.CreateCommand(
             "INSERT INTO position_history (mmsi, latitude, longitude, recorded_time, is_plausible) " +
@@ -143,6 +143,6 @@ public class DatabaseService
         cmd.Parameters.AddWithValue("recorded_time", AsUtc(time));
         cmd.Parameters.AddWithValue("is_plausible", isPlausible);
 
-        await cmd.ExecuteNonQueryAsync();
+        await cmd.ExecuteNonQueryAsync(ct);
     }
 }
